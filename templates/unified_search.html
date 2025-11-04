@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+
+{% block title %}Unified Search - BookScout{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h1><i class="bi bi-search"></i> Unified Search</h1>
+        <p class="text-muted">Search both Prowlarr (Usenet) and Jackett (Torrents) simultaneously</p>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-lg-8">
+        <div class="input-group input-group-lg">
+            <input type="text" class="form-control" id="searchQuery" placeholder="Enter book title or author name...">
+            <button class="btn btn-primary" type="button" id="searchButton" onclick="performSearch()">
+                <i class="bi bi-search"></i> Search
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="loadingSpinner" class="text-center my-5" style="display: none;">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+    <p class="mt-2">Searching Prowlarr and Jackett...</p>
+</div>
+
+<div id="resultsContainer">
+    <div id="resultsHeader" style="display: none;" class="mb-3">
+        <h4>Results: <span id="resultsCount">0</span> items found</h4>
+    </div>
+    
+    <div class="table-responsive">
+        <table class="table table-hover" id="resultsTable" style="display: none;">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>Source</th>
+                    <th>Type</th>
+                    <th>Indexer</th>
+                    <th>Size</th>
+                    <th>Seeders</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="resultsBody">
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="downloadToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-header">
+            <strong class="me-auto">BookScout</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+        </div>
+        <div class="toast-body" id="toastMessage">
+        </div>
+    </div>
+</div>
+
+<script>
+function performSearch() {
+    const query = document.getElementById('searchQuery').value.trim();
+    
+    if (!query) {
+        alert('Please enter a search query');
+        return;
+    }
+    
+    // Show loading spinner
+    document.getElementById('loadingSpinner').style.display = 'block';
+    document.getElementById('resultsHeader').style.display = 'none';
+    document.getElementById('resultsTable').style.display = 'none';
+    document.getElementById('resultsBody').innerHTML = '';
+    
+    // Perform search
+    fetch('/api/unified-search', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query: query })
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Hide loading spinner
+        document.getElementById('loadingSpinner').style.display = 'none';
+        
+        if (data.error) {
+            alert('Error: ' + data.error);
+            return;
+        }
+        
+        // Display results
+        displayResults(data.results, data.count);
+    })
+    .catch(error => {
+        document.getElementById('loadingSpinner').style.display = 'none';
+        alert('Search failed: ' + error);
+        console.error('Error:', error);
+    });
+}
+
+function displayResults(results, count) {
+    document.getElementById('resultsCount').textContent = count;
+    document.getElementById('resultsHeader').style.display = 'block';
+    
+    if (count === 0) {
+        document.getElementById('resultsBody').innerHTML = '<tr><td colspan="7" class="text-center">No results found</td></tr>';
+        document.getElementById('resultsTable').style.display = 'table';
+        return;
+    }
+    
+    const tbody = document.getElementById('resultsBody');
+    tbody.innerHTML = '';
+    
+    results.forEach((result, index) => {
+        const row = document.createElement('tr');
+        
+        // Title
+        const titleCell = document.createElement('td');
+        titleCell.textContent = result.title;
+        titleCell.style.maxWidth = '300px';
+        titleCell.style.overflow = 'hidden';
+        titleCell.style.textOverflow = 'ellipsis';
+        titleCell.title = result.title;
+        row.appendChild(titleCell);
+        
+        // Source
+        const sourceCell = document.createElement('td');
+        const sourceBadge = document.createElement('span');
+        sourceBadge.className = result.source === 'Prowlarr' ? 'badge bg-info' : 'badge bg-warning';
+        sourceBadge.textContent = result.source;
+        sourceCell.appendChild(sourceBadge);
+        row.appendChild(sourceCell);
+        
+        // Type
+        const typeCell = document.createElement('td');
+        const typeBadge = document.createElement('span');
+        typeBadge.className = result.type === 'Usenet' ? 'badge bg-primary' : 'badge bg-success';
+        typeBadge.textContent = result.type;
+        typeCell.appendChild(typeBadge);
+        row.appendChild(typeCell);
+        
+        // Indexer
+        const indexerCell = document.createElement('td');
+        indexerCell.textContent = result.indexer || 'N/A';
+        row.appendChild(indexerCell);
+        
+        // Size
+        const sizeCell = document.createElement('td');
+        sizeCell.textContent = result.size_display || 'N/A';
+        row.appendChild(sizeCell);
+        
+        // Seeders (only for torrents)
+        const seedersCell = document.createElement('td');
+        if (result.type === 'Torrent') {
+            const seedersSpan = document.createElement('span');
+            seedersSpan.className = result.seeders > 10 ? 'text-success' : (result.seeders > 0 ? 'text-warning' : 'text-danger');
+            seedersSpan.textContent = result.seeders;
+            seedersCell.appendChild(seedersSpan);
+        } else {
+            seedersCell.textContent = 'N/A';
+        }
+        row.appendChild(seedersCell);
+        
+        // Action
+        const actionCell = document.createElement('td');
+        const downloadBtn = document.createElement('button');
+        downloadBtn.className = 'btn btn-sm btn-primary';
+        downloadBtn.innerHTML = '<i class="bi bi-download"></i> Download';
+        downloadBtn.onclick = () => sendToDownloadClient(result);
+        actionCell.appendChild(downloadBtn);
+        row.appendChild(actionCell);
+        
+        tbody.appendChild(row);
+    });
+    
+    document.getElementById('resultsTable').style.display = 'table';
+}
+
+function sendToDownloadClient(result) {
+    const downloadUrl = result.magnet_url || result.download_url;
+    
+    if (!downloadUrl) {
+        showToast('Error: No download URL available', 'danger');
+        return;
+    }
+    
+    fetch('/api/download', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            download_url: downloadUrl,
+            title: result.title,
+            type: result.type
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast(data.message, 'success');
+        } else {
+            showToast('Error: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => {
+        showToast('Download failed: ' + error, 'danger');
+        console.error('Error:', error);
+    });
+}
+
+function showToast(message, type) {
+    const toastEl = document.getElementById('downloadToast');
+    const toastMessage = document.getElementById('toastMessage');
+    
+    toastMessage.textContent = message;
+    toastMessage.className = 'toast-body';
+    
+    if (type === 'success') {
+        toastMessage.classList.add('bg-success', 'text-white');
+    } else {
+        toastMessage.classList.add('bg-danger', 'text-white');
+    }
+    
+    const toast = new bootstrap.Toast(toastEl);
+    toast.show();
+}
+
+// Allow Enter key to trigger search
+document.getElementById('searchQuery').addEventListener('keypress', function(event) {
+    if (event.key === 'Enter') {
+        performSearch();
+    }
+});
+</script>
+
+{% endblock %}

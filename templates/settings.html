@@ -62,7 +62,7 @@
                 </div>
                 <div class="card-body">
                     <p class="text-muted">
-                        Configure Prowlarr to search for books across your indexers.
+                        Configure Prowlarr to search for books across your Usenet indexers.
                     </p>
                     
                     <div class="mb-3">
@@ -84,6 +84,130 @@
                                placeholder="Your Prowlarr API key">
                         <div class="form-text">
                             Get this from Prowlarr: Settings → General → API Key
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h5 class="mb-0">Jackett Integration</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">
+                        Configure Jackett to search for books across your torrent indexers.
+                    </p>
+                    
+                    <div class="mb-3">
+                        <label for="jackett_url" class="form-label">Jackett URL</label>
+                        <input type="text" class="form-control" id="jackett_url" 
+                               name="jackett_url" 
+                               value="{{ settings.get('jackett_url', '') }}"
+                               placeholder="http://10.0.0.22:9117">
+                        <div class="form-text">
+                            Full URL to your Jackett instance
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="jackett_api_key" class="form-label">API Key</label>
+                        <input type="password" class="form-control" id="jackett_api_key" 
+                               name="jackett_api_key" 
+                               value="{{ settings.get('jackett_api_key', '') }}"
+                               placeholder="Your Jackett API key">
+                        <div class="form-text">
+                            Get this from Jackett: Click the gear icon → Copy API Key
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h5 class="mb-0">SABnzbd Integration</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">
+                        Configure SABnzbd to download NZB files (Usenet).
+                    </p>
+                    
+                    <div class="mb-3">
+                        <label for="sabnzbd_url" class="form-label">SABnzbd URL</label>
+                        <input type="text" class="form-control" id="sabnzbd_url" 
+                               name="sabnzbd_url" 
+                               value="{{ settings.get('sabnzbd_url', '') }}"
+                               placeholder="http://localhost:8080">
+                        <div class="form-text">
+                            Full URL to your SABnzbd instance
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="sabnzbd_api_key" class="form-label">API Key</label>
+                        <input type="password" class="form-control" id="sabnzbd_api_key" 
+                               name="sabnzbd_api_key" 
+                               value="{{ settings.get('sabnzbd_api_key', '') }}"
+                               placeholder="Your SABnzbd API key">
+                        <div class="form-text">
+                            Get this from SABnzbd: Config → General → API Key
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h5 class="mb-0">Torrent Client Integration</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">
+                        Configure your torrent client to download torrent files.
+                    </p>
+                    
+                    <div class="mb-3">
+                        <label for="torrent_client_type" class="form-label">Torrent Client Type</label>
+                        <select class="form-select" id="torrent_client_type" name="torrent_client_type" onchange="updateTorrentClientFields()">
+                            <option value="" {% if not settings.get('torrent_client_type') %}selected{% endif %}>-- Select Client --</option>
+                            <option value="qbittorrent" {% if settings.get('torrent_client_type') == 'qbittorrent' %}selected{% endif %}>qBittorrent</option>
+                            <option value="transmission" {% if settings.get('torrent_client_type') == 'transmission' %}selected{% endif %}>Transmission</option>
+                            <option value="deluge" {% if settings.get('torrent_client_type') == 'deluge' %}selected{% endif %}>Deluge</option>
+                            <option value="rtorrent" {% if settings.get('torrent_client_type') == 'rtorrent' %}selected{% endif %}>rTorrent/ruTorrent</option>
+                        </select>
+                        <div class="form-text">
+                            Select which torrent client you want to use
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="torrent_client_url" class="form-label">URL</label>
+                        <input type="text" class="form-control" id="torrent_client_url" 
+                               name="torrent_client_url" 
+                               value="{{ settings.get('torrent_client_url', '') }}"
+                               placeholder="http://localhost:8080">
+                        <div class="form-text" id="torrent_url_help">
+                            Full URL to your torrent client Web UI
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3" id="torrent_username_field">
+                        <label for="torrent_client_username" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="torrent_client_username" 
+                               name="torrent_client_username" 
+                               value="{{ settings.get('torrent_client_username', '') }}"
+                               placeholder="admin">
+                        <div class="form-text">
+                            Web UI username
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3" id="torrent_password_field">
+                        <label for="torrent_client_password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="torrent_client_password" 
+                               name="torrent_client_password" 
+                               value="{{ settings.get('torrent_client_password', '') }}"
+                               placeholder="Your password">
+                        <div class="form-text">
+                            Web UI password
                         </div>
                     </div>
                 </div>
@@ -119,4 +243,51 @@
         </div>
     </div>
 </div>
+
+<script>
+function updateTorrentClientFields() {
+    const clientType = document.getElementById('torrent_client_type').value;
+    const urlHelp = document.getElementById('torrent_url_help');
+    const usernameField = document.getElementById('torrent_username_field');
+    const passwordField = document.getElementById('torrent_password_field');
+    const urlInput = document.getElementById('torrent_client_url');
+    
+    // Update placeholder and help text based on client type
+    switch(clientType) {
+        case 'qbittorrent':
+            urlInput.placeholder = 'http://localhost:8080';
+            urlHelp.textContent = 'Full URL to your qBittorrent Web UI (default port: 8080)';
+            usernameField.style.display = 'block';
+            passwordField.style.display = 'block';
+            break;
+        case 'transmission':
+            urlInput.placeholder = 'http://localhost:9091';
+            urlHelp.textContent = 'Full URL to your Transmission Web UI (default port: 9091)';
+            usernameField.style.display = 'block';
+            passwordField.style.display = 'block';
+            break;
+        case 'deluge':
+            urlInput.placeholder = 'http://localhost:8112';
+            urlHelp.textContent = 'Full URL to your Deluge Web UI (default port: 8112)';
+            usernameField.style.display = 'block';
+            passwordField.style.display = 'block';
+            break;
+        case 'rtorrent':
+            urlInput.placeholder = 'http://localhost:80/RPC2';
+            urlHelp.textContent = 'Full URL to your ruTorrent RPC endpoint (usually /RPC2)';
+            usernameField.style.display = 'block';
+            passwordField.style.display = 'block';
+            break;
+        default:
+            urlInput.placeholder = 'http://localhost:8080';
+            urlHelp.textContent = 'Full URL to your torrent client Web UI';
+            usernameField.style.display = 'block';
+            passwordField.style.display = 'block';
+    }
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', updateTorrentClientFields);
+</script>
+
 {% endblock %}
