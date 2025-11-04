@@ -17,6 +17,21 @@ app.config['DATABASE'] = os.path.join(DATA_DIR, 'bookscout.db')
 app.config['CONFIG_FILE'] = os.path.join(DATA_DIR, 'config.json')
 app.secret_key = os.getenv('SECRET_KEY', 'bookscout-secret-key-change-in-production')
 
+# Read version from VERSION file
+def get_version():
+    """Read version from VERSION file"""
+    version_file = os.path.join(os.path.dirname(__file__), 'VERSION')
+    try:
+        with open(version_file, 'r') as f:
+            return f.read().strip()
+    except:
+        return 'unknown'
+
+# Make version available to all templates
+@app.context_processor
+def inject_version():
+    return dict(version=get_version())
+
 # API Configuration
 OPENLIBRARY_API = "https://openlibrary.org/search.json"
 GOOGLE_BOOKS_API = "https://www.googleapis.com/books/v1/volumes"
