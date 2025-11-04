@@ -99,6 +99,24 @@ def init_db():
             value TEXT
         );
     ''')
+    
+    # Migration: Add missing columns to existing tables
+    cursor = db.cursor()
+    
+    # Check if 'active' column exists in authors table
+    cursor.execute("PRAGMA table_info(authors)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'active' not in columns:
+        db.execute('ALTER TABLE authors ADD COLUMN active INTEGER DEFAULT 1')
+    
+    # Check if 'series' and 'series_position' columns exist in books table
+    cursor.execute("PRAGMA table_info(books)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'series' not in columns:
+        db.execute('ALTER TABLE books ADD COLUMN series TEXT')
+    if 'series_position' not in columns:
+        db.execute('ALTER TABLE books ADD COLUMN series_position TEXT')
+    
     db.commit()
     db.close()
 
