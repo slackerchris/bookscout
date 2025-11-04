@@ -187,12 +187,57 @@ def query_audnexus(author_name: str) -> List[Dict]:
         return []
 
 
+def extract_series_from_title(title: str) -> tuple:
+    """Extract series name and position from title"""
+    import re
+    
+    # Multiple patterns to match different series formats
+    patterns = [
+        # Parenthetical formats
+        r'\(([^)]+?)\s*#(\d+(?:\.\d+)?)\)',  # (Series #1)
+        r'\(([^)]+?),?\s*Book\s+(\d+(?:\.\d+)?)\)',  # (Series, Book 1) or (Series Book 1)
+        r'\(([^)]+?),?\s*Vol\.?\s+(\d+(?:\.\d+)?)\)',  # (Series, Vol 1)
+        r'\(([^)]+?)\s*-\s*Book\s+(\d+(?:\.\d+)?)\)',  # (Series - Book 1)
+        # Colon/subtitle formats
+        r'^(.+?):\s*Book\s+(\d+(?:\.\d+)?)\s*[-:]',  # Series: Book 1 - Title
+        r'^(.+?)\s*#(\d+(?:\.\d+)?)\s*[-:]',  # Series #1 - Title
+        # Trailing number formats  
+        r'(.+?)\s+Book\s+(\d+(?:\.\d+)?)$',  # Title Book 1
+        r'(.+?)\s+#(\d+(?:\.\d+)?)$',  # Title #1
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, title, re.IGNORECASE)
+        if match:
+            series = match.group(1).strip()
+            position = match.group(2)
+            # Clean up the title - remove the series pattern
+            clean_title = re.sub(pattern, '', title, flags=re.IGNORECASE).strip()
+            # Remove extra punctuation
+            clean_title = re.sub(r'^[-:\s]+|[-:\s]+$', '', clean_title).strip()
+            # If clean_title is empty or too short, use original
+            if len(clean_title) < 3:
+                clean_title = title
+            return clean_title, series, position
+    
+    return title, None, None
+
+
 def merge_books(books_lists: List[List[Dict]]) -> List[Dict]:
     """Merge and deduplicate books from multiple sources"""
     merged = {}
     
     for books in books_lists:
         for book in books:
+            # Extract series information from title
+            title, series, series_pos = extract_series_from_title(book['title'])
+            book['title'] = title
+            if series:
+                book['series'] = series
+                book['series_position'] = series_pos
+            else:
+                book['series'] = None
+                book['series_position'] = None
             # Create a key for deduplication
             key = None
             if book.get('isbn13'):
@@ -223,28 +268,105 @@ def merge_books(books_lists: List[List[Dict]]) -> List[Dict]:
     return list(merged.values())
 
 
-def check_audiobookshelf(book_title: str, author_name: str) -> bool:
-    """Check if book exists in Audiobookshelf library"""
-    if not AUDIOBOOKSHELF_URL or not AUDIOBOOKSHELF_TOKEN:
-        return False
+def search_audible_metadata_direct(book_title: str, author_name: str) -> tuple:
+    """Search Audible API directly for book metadata including series
+    Two-step process:
+    1. Query api.audible.com to get ASIN
+    2. Query api.audnex.us with ASIN to get full metadata including series
+    Returns: (series_name: str|None, series_position: str|None)
+    """
+    try:
+        # Step 1: Get ASIN from Audible API
+        params = {
+            'num_results': '1',
+            'products_sort_by': 'Relevance',
+            'title': book_title
+        }
+        if author_name:
+            params['author'] = author_name
+        
+        audible_url = 'https://api.audible.com/1.0/catalog/products'
+        response = requests.get(audible_url, params=params, timeout=10)
+        
+        if response.status_code != 200:
+            return (None, None)
+        
+        data = response.json()
+        products = data.get('products', [])
+        
+        if not products:
+            return (None, None)
+        
+        # Get ASIN from first result
+        asin = products[0].get('asin')
+        if not asin:
+            return (None, None)
+        
+        # Step 2: Get full metadata from Audnexus using ASIN
+        audnexus_url = f'https://api.audnex.us/books/{asin}'
+        audnexus_response = requests.get(audnexus_url, timeout=10)
+        
+        if audnexus_response.status_code != 200:
+            return (None, None)
+        
+        book_data = audnexus_response.json()
+        
+        # Check for series in seriesPrimary field (Audnexus format)
+        series_primary = book_data.get('seriesPrimary')
+        if series_primary:
+            series_name = series_primary.get('name')
+            series_position = series_primary.get('position')
+            
+            if series_name:
+                print(f"    Found series via Audible API: {series_name} #{series_position}")
+                return (series_name, series_position)
+        
+        return (None, None)
+        
+    except requests.exceptions.Timeout:
+        print(f"  Audible API timeout for '{book_title}'")
+        return (None, None)
+    except Exception as e:
+        print(f"  Error searching Audible API: {e}")
+        return (None, None)
+
+
+def check_audiobookshelf(book_title: str, author_name: str) -> tuple:
+    """Check if book exists in Audiobookshelf library
+    Returns: (has_book: bool, series_name: str|None, series_position: str|None)
+    """
+    # Get settings from database
+    settings = get_settings_from_db()
+    abs_url = settings.get('audiobookshelf_url') or AUDIOBOOKSHELF_URL
+    abs_token = settings.get('audiobookshelf_token') or AUDIOBOOKSHELF_TOKEN
+    
+    if not abs_url or not abs_token:
+        print(f"  Audiobookshelf not configured (URL: {abs_url is not None}, Token: {abs_token is not None})")
+        return (False, None, None)
     
     try:
-        headers = {'Authorization': f'Bearer {AUDIOBOOKSHELF_TOKEN}'}
+        headers = {'Authorization': f'Bearer {abs_token}'}
         response = requests.get(
-            f"{AUDIOBOOKSHELF_URL}/api/libraries",
+            f"{abs_url}/api/libraries",
             headers=headers,
             timeout=10
         )
         
         if response.status_code != 200:
-            return False
+            return (False, None, None)
         
         libraries = response.json().get('libraries', [])
+        
+        # Normalize book title for better matching
+        # Remove common series indicators, punctuation, and extra spaces
+        normalized_title = book_title.lower().strip()
+        normalized_title = normalized_title.replace(':', '').replace(',', '').replace('-', ' ')
+        title_words = set(normalized_title.split())
         
         # Search each library
         for library in libraries:
             search_response = requests.get(
-                f"{AUDIOBOOKSHELF_URL}/api/libraries/{library['id']}/search",
+                f"{abs_url}/api/libraries/{library['id']}/search",
                 params={'q': book_title},
                 headers=headers,
                 timeout=10
@@ -252,14 +374,60 @@ def check_audiobookshelf(book_title: str, author_name: str) -> bool:
             
             if search_response.status_code == 200:
                 results = search_response.json()
-                for item in results.get('book', []):
-                    if book_title.lower() in item.get('title', '').lower():
-                        return True
+                book_results = results.get('book', [])
+                
+                if len(book_results) > 0:
+                    print(f"  Audiobookshelf search for '{book_title}' returned {len(book_results)} results")
+                    # Debug: show structure of first result
+                    if len(book_results) > 0:
+                        print(f"  First result keys: {list(book_results[0].keys())}")
+                
+                for item in book_results:
+                    # Search API returns libraryItem object directly
+                    library_item = item.get('libraryItem', {})
+                    media = library_item.get('media', {})
+                    metadata = media.get('metadata', {})
+                    
+                    abs_title = metadata.get('title', '').lower().strip()
+                    
+                    # Try exact substring match first
+                    if book_title.lower() in abs_title or abs_title in book_title.lower():
+                        # Extract series info from search result
+                        series_name = None
+                        series_pos = None
+                        series_list = metadata.get('series', [])
+                        
+                        if series_list and len(series_list) > 0:
+                            series_name = series_list[0].get('name')
+                            series_pos = series_list[0].get('sequence')
+                        
+                        print(f"  MATCH found: '{book_title}' -> series={series_name}, pos={series_pos}")
+                        return (True, series_name, series_pos)
+                    
+                    # Try normalized word matching (at least 75% of words match)
+                    abs_normalized = abs_title.replace(':', '').replace(',', '').replace('-', ' ')
+                    abs_words = set(abs_normalized.split())
+                    
+                    if len(title_words) > 0:
+                        overlap = len(title_words & abs_words)
+                        similarity = overlap / len(title_words)
+                        if similarity >= 0.75:
+                            # Extract series info from search result
+                            series_name = None
+                            series_pos = None
+                            series_list = metadata.get('series', [])
+                            
+                            if series_list and len(series_list) > 0:
+                                series_name = series_list[0].get('name')
+                                series_pos = series_list[0].get('sequence')
+                            
+                            print(f"  MATCH found: '{book_title}' (similarity: {similarity:.2f}) -> series={series_name}, pos={series_pos}")
+                            return (True, series_name, series_pos)
         
-        return False
+        return (False, None, None)
     except Exception as e:
         print(f"Error checking Audiobookshelf: {e}")
-        return False
+        return (False, None, None)
 
 
 def get_all_authors_from_audiobookshelf() -> List[str]:
@@ -474,12 +642,13 @@ def search_jackett_api(query: str) -> List[Dict]:
         return []
     
     try:
+        # Don't filter by category - let Jackett return all results and filter by query
         response = requests.get(
             f"{jackett_url}/api/v2.0/indexers/all/results",
             params={
                 'apikey': jackett_key,
                 'Query': query,
-                'Category[]': [7000, 7020, 8000, 8010]  # Books, Audiobooks, Ebooks
+                # Removed Category filtering - Jackett will search all categories
             },
             timeout=30
         )
@@ -490,6 +659,12 @@ def search_jackett_api(query: str) -> List[Dict]:
         
         data = response.json()
         results = data.get('Results', [])
+        print(f"Jackett returned {len(results)} total results from API")
+        
+        # Debug: print first few result titles
+        for i, item in enumerate(results[:5]):
+            print(f"  Jackett result {i+1}: {item.get('Title', 'NO TITLE')}")
+        
         parsed_results = []
         
         for item in results:
@@ -550,29 +725,70 @@ def send_to_sabnzbd(download_url: str, title: str) -> bool:
         return False
     
     try:
-        response = requests.get(
+        # First, download the NZB file from Prowlarr
+        print(f"Downloading NZB from: {download_url}")
+        nzb_response = requests.get(download_url, timeout=30, allow_redirects=True)
+        
+        if nzb_response.status_code != 200:
+            print(f"Failed to download NZB: {nzb_response.status_code}")
+            return False
+        
+        nzb_content = nzb_response.content
+        
+        # Check if we actually got an NZB file (should start with <?xml)
+        if not nzb_content.startswith(b'<?xml'):
+            print(f"Downloaded content is not an NZB file. First 200 bytes: {nzb_content[:200]}")
+            # Try using addurl mode instead
+            print(f"Trying addurl mode as fallback...")
+            response = requests.get(
+                f"{sabnzbd_url}/api",
+                params={
+                    'mode': 'addurl',
+                    'name': download_url,
+                    'nzbname': title,
+                    'apikey': sabnzbd_key,
+                    'output': 'json'
+                },
+                timeout=10
+            )
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('status'):
+                    print(f"Successfully sent to SABnzbd via addurl: {title}")
+                    return True
+            return False
+        
+        # Now send the NZB content directly to SABnzbd
+        response = requests.post(
             f"{sabnzbd_url}/api",
             params={
-                'mode': 'addurl',
-                'name': download_url,
-                'nzbname': title,
+                'mode': 'addfile',
                 'apikey': sabnzbd_key,
-                'output': 'json'
+                'output': 'json',
+                'nzbname': title
             },
+            files={'nzbfile': (f'{title}.nzb', nzb_content, 'application/x-nzb')},
             timeout=10
         )
         
         if response.status_code == 200:
             result = response.json()
+            print(f"SABnzbd response: {result}")
             if result.get('status'):
                 print(f"Successfully sent to SABnzbd: {title}")
                 return True
+            else:
+                print(f"SABnzbd returned error: {result}")
+                return False
         
         print(f"Failed to send to SABnzbd: {response.status_code}")
+        print(f"Response: {response.text}")
         return False
         
     except Exception as e:
         print(f"Error sending to SABnzbd: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -692,29 +908,44 @@ def send_to_deluge(download_url: str, title: str) -> bool:
         )
         
         if login_response.status_code != 200:
-            print("Deluge login failed")
+            print(f"Deluge login failed: {login_response.status_code}")
+            print(f"Response: {login_response.text}")
             return False
         
-        # Add torrent
+        login_result = login_response.json()
+        if not login_result.get('result'):
+            print(f"Deluge authentication failed: {login_result}")
+            return False
+        
+        # Add torrent - Deluge uses core.add_torrent_url for URLs
         add_response = session.post(
             f"{deluge_url}/json",
             json={
-                'method': 'web.add_torrents',
-                'params': [[{'path': download_url, 'options': {}}]],
+                'method': 'core.add_torrent_url',
+                'params': [download_url, {}],
                 'id': 2
             },
             timeout=10
         )
         
         if add_response.status_code == 200:
-            print(f"Successfully sent to Deluge: {title}")
-            return True
+            result = add_response.json()
+            print(f"Deluge add response: {result}")
+            if result.get('result'):
+                print(f"Successfully sent to Deluge: {title}")
+                return True
+            else:
+                print(f"Deluge returned error: {result.get('error')}")
+                return False
         
-        print(f"Failed to add torrent to Deluge")
+        print(f"Failed to add torrent to Deluge: {add_response.status_code}")
+        print(f"Response: {add_response.text}")
         return False
         
     except Exception as e:
         print(f"Error sending to Deluge: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -895,12 +1126,25 @@ def scan_author(author_id):
     # Merge results
     all_books = merge_books([openlibrary_books, google_books, audnexus_books])
     
-    # Check against Audiobookshelf
+    # Check against Audiobookshelf and get series info
     for book in all_books:
-        book['have_it'] = check_audiobookshelf(book['title'], author_name)
+        has_it, abs_series, abs_series_pos = check_audiobookshelf(book['title'], author_name)
+        book['have_it'] = 1 if has_it else 0
+        
+        # If Audiobookshelf has series info, use it (it's most accurate)
+        if abs_series:
+            book['series'] = abs_series
+            book['series_position'] = abs_series_pos
+        # If book not in library and no series from title parsing, query Audible API directly
+        elif not has_it and not book.get('series'):
+            audible_series, audible_pos = search_audible_metadata_direct(book['title'], author_name)
+            if audible_series:
+                book['series'] = audible_series
+                book['series_position'] = audible_pos
     
     # Store in database
     new_books = 0
+    updated_books = 0
     for book in all_books:
         # Check if book already exists
         existing = db.execute(
@@ -911,15 +1155,26 @@ def scan_author(author_id):
         if not existing:
             db.execute('''
                 INSERT INTO books (author_id, title, subtitle, isbn, isbn13, asin, 
-                                  release_date, format, source, cover_url, description, have_it)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  release_date, format, source, cover_url, description, 
+                                  series, series_position, have_it)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 author_id, book['title'], book.get('subtitle'), book.get('isbn'),
                 book.get('isbn13'), book.get('asin'), book.get('release_date'),
                 book.get('format'), json.dumps(book['source']) if isinstance(book['source'], list) else book['source'],
-                book.get('cover_url'), book.get('description'), book.get('have_it', 0)
+                book.get('cover_url'), book.get('description'),
+                book.get('series'), book.get('series_position'), book.get('have_it', 0)
             ))
             new_books += 1
+        else:
+            # Update have_it status and series info for existing books
+            db.execute(
+                'UPDATE books SET have_it = ?, series = ?, series_position = ? WHERE id = ?',
+                (book.get('have_it', 0), book.get('series'), book.get('series_position'), existing['id'])
+            )
+            updated_books += 1
+    
+    print(f"Scan complete: {new_books} new books, {updated_books} existing books updated")
     
     # Update scan history
     db.execute(
@@ -947,18 +1202,27 @@ def view_author(author_id):
     
     if show_missing_only:
         books = db.execute(
-            'SELECT * FROM books WHERE author_id = ? AND have_it = 0 ORDER BY release_date DESC',
+            'SELECT * FROM books WHERE author_id = ? AND have_it = 0 ORDER BY series, series_position, release_date DESC',
             (author_id,)
         ).fetchall()
     else:
         books = db.execute(
-            'SELECT * FROM books WHERE author_id = ? ORDER BY release_date DESC',
+            'SELECT * FROM books WHERE author_id = ? ORDER BY series, series_position, release_date DESC',
             (author_id,)
         ).fetchall()
     
+    # Group books by series
+    books_by_series = {}
+    for book in books:
+        series_key = book['series'] if book['series'] else 'Standalone'
+        if series_key not in books_by_series:
+            books_by_series[series_key] = []
+        books_by_series[series_key].append(dict(book))
+    
     db.close()
     
-    return render_template('author.html', author=author, books=books, show_missing_only=show_missing_only)
+    return render_template('author.html', author=author, books=books, 
+                         books_by_series=books_by_series, show_missing_only=show_missing_only)
 
 
 @app.route('/books/<int:book_id>/search-prowlarr', methods=['POST'])

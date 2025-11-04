@@ -91,8 +91,19 @@
     </div>
 </div>
 
-<div class="row">
-    {% for book in books %}
+{% for series_name in (books_by_series.keys()|reject('equalto', 'Standalone')|sort) + ['Standalone']|select('in', books_by_series.keys())|list %}
+    {% set series_books = books_by_series[series_name] %}
+    <div class="mb-4">
+        <h4 class="border-bottom pb-2">
+            {% if series_name == 'Standalone' %}
+                <i class="bi bi-book"></i> Standalone Books
+            {% else %}
+                <i class="bi bi-collection"></i> {{ series_name }}
+            {% endif %}
+            <span class="badge bg-secondary ms-2">{{ series_books|length }}</span>
+        </h4>
+        <div class="row">
+    {% for book in series_books %}
     <div class="col-md-6 col-lg-4 col-xl-3 mb-4">
         <div class="card book-card h-100">
             <div class="position-relative">
@@ -153,55 +164,251 @@
                 {% endif %}
                 
                 {% if not book.have_it %}
-                    <button class="btn btn-sm btn-primary mt-2 w-100 search-prowlarr" 
-                            data-book-id="{{ book.id }}">
-                        <i class="bi bi-search"></i> Search via Prowlarr
+                    <button class="btn btn-sm btn-primary mt-2 w-100 unified-search-btn" 
+                            data-book-title="{{ book.title }}"
+                            data-author-name="{{ author.name }}">
+                        <i class="bi bi-search"></i> Search
                     </button>
                 {% endif %}
             </div>
         </div>
     </div>
     {% endfor %}
-</div>
+        </div>
+    </div>
+{% endfor %}
 {% else %}
 <div class="alert alert-warning">
     <i class="bi bi-exclamation-triangle"></i> No books found yet. Click "Re-scan Now" to search for books.
 </div>
 {% endif %}
+
+<!-- Search Results Modal -->
+<div class="modal fade" id="searchResultsModal" tabindex="-1" aria-labelledby="searchResultsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="searchResultsModalLabel">Search Results</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="searchLoadingSpinner" class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Searching Prowlarr and Jackett...</p>
+                </div>
+                
+                <div id="searchResultsContent" style="display: none;">
+                    <div class="mb-3">
+                        <strong id="searchResultsCount">0</strong> results found
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Source</th>
+                                    <th>Title</th>
+                                    <th>Indexer</th>
+                                    <th>Size</th>
+                                    <th>Seeders</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="searchResultsTableBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <div id="searchNoResults" style="display: none;" class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle"></i> No results found
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast for download notifications -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="downloadToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-header">
+            <strong class="me-auto">BookScout</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+        </div>
+        <div class="toast-body" id="toastMessage">
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
-document.querySelectorAll('.search-prowlarr').forEach(button => {
+// Unified search functionality
+document.querySelectorAll('.unified-search-btn').forEach(button => {
     button.addEventListener('click', function() {
-        const bookId = this.getAttribute('data-book-id');
-        const btn = this;
+        const bookTitle = this.getAttribute('data-book-title');
+        const authorName = this.getAttribute('data-author-name');
+        const query = `${bookTitle} ${authorName}`;
         
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Searching...';
+        // Open modal
+        const modal = new bootstrap.Modal(document.getElementById('searchResultsModal'));
+        modal.show();
         
-        fetch(`/books/${bookId}/search-prowlarr`, {
-            method: 'POST'
+        // Reset modal content
+        document.getElementById('searchLoadingSpinner').style.display = 'block';
+        document.getElementById('searchResultsContent').style.display = 'none';
+        document.getElementById('searchNoResults').style.display = 'none';
+        document.getElementById('searchResultsModalLabel').textContent = `Search Results: ${bookTitle}`;
+        
+        // Perform search
+        fetch('/api/unified-search', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ query: query })
         })
         .then(response => response.json())
         .then(data => {
-            if (data.success && data.url) {
-                window.open(data.url, '_blank');
-                btn.innerHTML = '<i class="bi bi-check-circle"></i> Opened in Prowlarr';
-                btn.classList.remove('btn-primary');
-                btn.classList.add('btn-success');
-            } else {
-                btn.innerHTML = '<i class="bi bi-x-circle"></i> Search failed';
-                btn.classList.remove('btn-primary');
-                btn.classList.add('btn-danger');
+            document.getElementById('searchLoadingSpinner').style.display = 'none';
+            
+            if (data.error) {
+                document.getElementById('searchNoResults').textContent = 'Error: ' + data.error;
+                document.getElementById('searchNoResults').style.display = 'block';
+                return;
             }
+            
+            if (data.count === 0) {
+                document.getElementById('searchNoResults').style.display = 'block';
+                return;
+            }
+            
+            // Display results
+            displaySearchResults(data.results, data.count);
         })
         .catch(error => {
-            btn.innerHTML = '<i class="bi bi-x-circle"></i> Error';
-            btn.classList.remove('btn-primary');
-            btn.classList.add('btn-danger');
+            document.getElementById('searchLoadingSpinner').style.display = 'none';
+            document.getElementById('searchNoResults').textContent = 'Search failed: ' + error;
+            document.getElementById('searchNoResults').style.display = 'block';
         });
     });
 });
+
+function displaySearchResults(results, count) {
+    document.getElementById('searchResultsCount').textContent = count;
+    document.getElementById('searchResultsContent').style.display = 'block';
+    
+    const tbody = document.getElementById('searchResultsTableBody');
+    tbody.innerHTML = '';
+    
+    results.forEach(result => {
+        const row = document.createElement('tr');
+        
+        // Source badge
+        const sourceCell = document.createElement('td');
+        const sourceBadge = document.createElement('span');
+        sourceBadge.className = result.source === 'Prowlarr' ? 'badge bg-info' : 'badge bg-warning text-dark';
+        sourceBadge.textContent = result.source;
+        const typeBadge = document.createElement('span');
+        typeBadge.className = result.type === 'Usenet' ? 'badge bg-primary ms-1' : 'badge bg-success ms-1';
+        typeBadge.textContent = result.type;
+        sourceCell.appendChild(sourceBadge);
+        sourceCell.appendChild(typeBadge);
+        row.appendChild(sourceCell);
+        
+        // Title
+        const titleCell = document.createElement('td');
+        titleCell.textContent = result.title;
+        titleCell.style.maxWidth = '400px';
+        titleCell.style.overflow = 'hidden';
+        titleCell.style.textOverflow = 'ellipsis';
+        titleCell.title = result.title;
+        row.appendChild(titleCell);
+        
+        // Indexer
+        const indexerCell = document.createElement('td');
+        indexerCell.textContent = result.indexer || 'N/A';
+        row.appendChild(indexerCell);
+        
+        // Size
+        const sizeCell = document.createElement('td');
+        sizeCell.textContent = result.size_display || 'N/A';
+        row.appendChild(sizeCell);
+        
+        // Seeders (only for torrents)
+        const seedersCell = document.createElement('td');
+        if (result.type === 'Torrent') {
+            const seedersSpan = document.createElement('span');
+            seedersSpan.className = result.seeders > 10 ? 'text-success fw-bold' : (result.seeders > 0 ? 'text-warning' : 'text-danger');
+            seedersSpan.textContent = result.seeders;
+            seedersCell.appendChild(seedersSpan);
+        } else {
+            seedersCell.textContent = 'N/A';
+        }
+        row.appendChild(seedersCell);
+        
+        // Action button
+        const actionCell = document.createElement('td');
+        const downloadBtn = document.createElement('button');
+        downloadBtn.className = 'btn btn-sm btn-primary';
+        downloadBtn.innerHTML = '<i class="bi bi-download"></i> Download';
+        downloadBtn.onclick = () => sendToDownloadClient(result);
+        actionCell.appendChild(downloadBtn);
+        row.appendChild(actionCell);
+        
+        tbody.appendChild(row);
+    });
+}
+
+function sendToDownloadClient(result) {
+    const downloadUrl = result.magnet_url || result.download_url;
+    
+    if (!downloadUrl) {
+        showToast('Error: No download URL available', 'danger');
+        return;
+    }
+    
+    fetch('/api/download', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            download_url: downloadUrl,
+            title: result.title,
+            type: result.type
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast(data.message, 'success');
+        } else {
+            showToast('Error: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => {
+        showToast('Download failed: ' + error, 'danger');
+    });
+}
+
+function showToast(message, type) {
+    const toastEl = document.getElementById('downloadToast');
+    const toastMessage = document.getElementById('toastMessage');
+    
+    toastMessage.textContent = message;
+    toastMessage.className = 'toast-body';
+    
+    if (type === 'success') {
+        toastMessage.classList.add('bg-success', 'text-white');
+    } else {
+        toastMessage.classList.add('bg-danger', 'text-white');
+    }
+    
+    const toast = new bootstrap.Toast(toastEl);
+    toast.show();
+}
 </script>
 {% endblock %}
