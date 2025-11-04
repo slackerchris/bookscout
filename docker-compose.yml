@@ -2,13 +2,12 @@ version: '3.8'
 
 services:
   bookscout:
-    build: .
+    image: ghcr.io/slackerchris/bookscout:latest
     container_name: bookscout
     ports:
       - "5000:5000"
     volumes:
-      - ./data:/app/data
-      - ./bookscout.db:/app/bookscout.db
+      - bookscout-data:/data
     environment:
       # Optional: Set these here or configure via the web UI
       - AUDIOBOOKSHELF_URL=${AUDIOBOOKSHELF_URL:-}

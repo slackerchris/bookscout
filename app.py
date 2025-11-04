@@ -10,7 +10,11 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, f
 from typing import List, Dict, Optional
 
 app = Flask(__name__)
-app.config['DATABASE'] = 'bookscout.db'
+
+# Use /data directory for persistent storage if it exists, otherwise use current directory
+DATA_DIR = '/data' if os.path.exists('/data') and os.access('/data', os.W_OK) else '.'
+app.config['DATABASE'] = os.path.join(DATA_DIR, 'bookscout.db')
+app.config['CONFIG_FILE'] = os.path.join(DATA_DIR, 'config.json')
 app.secret_key = os.getenv('SECRET_KEY', 'bookscout-secret-key-change-in-production')
 
 # API Configuration
