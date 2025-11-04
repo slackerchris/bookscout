@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  bookscout:
+    build: .
+    container_name: bookscout
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+      - ./bookscout.db:/app/bookscout.db
+    environment:
+      # Optional: Set these here or configure via the web UI
+      - AUDIOBOOKSHELF_URL=${AUDIOBOOKSHELF_URL:-}
+      - AUDIOBOOKSHELF_TOKEN=${AUDIOBOOKSHELF_TOKEN:-}
+      - PROWLARR_URL=${PROWLARR_URL:-}
+      - PROWLARR_API_KEY=${PROWLARR_API_KEY:-}
+    restart: unless-stopped
+    networks:
+      - bookscout
+
+networks:
+  bookscout:
+    driver: bridge

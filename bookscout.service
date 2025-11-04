@@ -1,0 +1,31 @@
+# BookScout systemd service file
+# 
+# Installation:
+# 1. Copy this file to /etc/systemd/system/bookscout.service
+# 2. Update paths and user below
+# 3. Run: sudo systemctl daemon-reload
+# 4. Run: sudo systemctl enable bookscout
+# 5. Run: sudo systemctl start bookscout
+
+[Unit]
+Description=BookScout - Multi-source book discovery
+After=network.target
+
+[Service]
+Type=simple
+User=your-username
+Group=your-username
+WorkingDirectory=/path/to/bookscout
+Environment="PATH=/path/to/venv/bin"
+ExecStart=/path/to/venv/bin/python app.py
+Restart=always
+RestartSec=10
+
+# Optional: Environment variables
+# Environment="AUDIOBOOKSHELF_URL=http://localhost:13378"
+# Environment="AUDIOBOOKSHELF_TOKEN=your_token"
+# Environment="PROWLARR_URL=http://localhost:9696"
+# Environment="PROWLARR_API_KEY=your_key"
+
+[Install]
+WantedBy=multi-user.target

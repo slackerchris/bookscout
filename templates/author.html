@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+
+{% block title %}{{ author.name }} - BookScout{% endblock %}
+
+{% block content %}
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+<div class="row mb-4">
+    <div class="col">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('index') }}">Authors</a></li>
+                <li class="breadcrumb-item active">{{ author.name }}</li>
+            </ol>
+        </nav>
+        <h1>{{ author.name }}</h1>
+        {% if author.last_scanned %}
+            <p class="text-muted">Last scanned: {{ author.last_scanned[:16] }}</p>
+        {% endif %}
+        <div class="btn-group" role="group">
+            <a href="{{ url_for('scan_author', author_id=author.id) }}" class="btn btn-success">
+                <i class="bi bi-arrow-repeat"></i> Re-scan Now
+            </a>
+            {% if show_missing_only %}
+                <a href="{{ url_for('view_author', author_id=author.id) }}" class="btn btn-outline-primary">
+                    <i class="bi bi-list"></i> Show All Books
+                </a>
+            {% else %}
+                <a href="{{ url_for('view_author', author_id=author.id, missing='true') }}" class="btn btn-outline-warning">
+                    <i class="bi bi-funnel"></i> Show Missing Only
+                </a>
+            {% endif %}
+            <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#editAuthorModal">
+                <i class="bi bi-pencil"></i> Edit Name
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Author Modal -->
+<div class="modal fade" id="editAuthorModal" tabindex="-1" aria-labelledby="editAuthorModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editAuthorModalLabel">Edit Author Name</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="{{ url_for('edit_author', author_id=author.id) }}" method="POST">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="author_name" class="form-label">Author Name</label>
+                        <input type="text" class="form-control" id="author_name" name="author_name" 
+                               value="{{ author.name }}" required>
+                        <div class="form-text">Update if the import was incorrect or you want to fix spelling</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-circle"></i> Save Changes
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% if books %}
+<div class="row mb-3">
+    <div class="col">
+        <div class="alert alert-info">
+            <strong>{{ books|length }}</strong> books found
+            <span class="ms-3">
+                <i class="bi bi-check-circle text-success"></i> 
+                <strong>{{ books|selectattr('have_it', 'equalto', 1)|list|length }}</strong> in library
+            </span>
+            <span class="ms-3">
+                <i class="bi bi-x-circle text-warning"></i> 
+                <strong>{{ books|selectattr('have_it', 'equalto', 0)|list|length }}</strong> missing
+            </span>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    {% for book in books %}
+    <div class="col-md-6 col-lg-4 col-xl-3 mb-4">
+        <div class="card book-card h-100">
+            <div class="position-relative">
+                {% if book.cover_url %}
+                    <img src="{{ book.cover_url }}" class="card-img-top cover-img" alt="{{ book.title }}">
+                {% else %}
+                    <div class="card-img-top cover-img bg-secondary d-flex align-items-center justify-content-center">
+                        <i class="bi bi-book text-white" style="font-size: 3rem;"></i>
+                    </div>
+                {% endif %}
+                {% if book.have_it %}
+                    <span class="badge bg-success have-badge">
+                        <i class="bi bi-check-circle"></i> Have
+                    </span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                <h6 class="card-title">{{ book.title }}</h6>
+                {% if book.subtitle %}
+                    <p class="card-text text-muted small">{{ book.subtitle }}</p>
+                {% endif %}
+                
+                <div class="mb-2">
+                    {% if book.release_date %}
+                        <small class="text-muted">
+                            <i class="bi bi-calendar"></i> {{ book.release_date[:4] }}
+                        </small>
+                    {% endif %}
+                    {% if book.format %}
+                        <small class="badge bg-info ms-1">{{ book.format }}</small>
+                    {% endif %}
+                </div>
+                
+                <div class="mb-2">
+                    {% set sources = book.source %}
+                    {% if sources %}
+                        {% if '[' in sources %}
+                            {% set source_list = sources.replace('[', '').replace(']', '').replace('"', '').replace("'", '').split(',') %}
+                            {% for source in source_list %}
+                                <span class="badge bg-secondary source-badge">{{ source.strip() }}</span>
+                            {% endfor %}
+                        {% else %}
+                            <span class="badge bg-secondary source-badge">{{ sources }}</span>
+                        {% endif %}
+                    {% endif %}
+                </div>
+                
+                {% if book.isbn or book.isbn13 %}
+                    <small class="text-muted d-block">
+                        ISBN: {{ book.isbn13 or book.isbn }}
+                    </small>
+                {% endif %}
+                
+                {% if book.asin %}
+                    <small class="text-muted d-block">
+                        ASIN: {{ book.asin }}
+                    </small>
+                {% endif %}
+                
+                {% if not book.have_it %}
+                    <button class="btn btn-sm btn-primary mt-2 w-100 search-prowlarr" 
+                            data-book-id="{{ book.id }}">
+                        <i class="bi bi-search"></i> Search via Prowlarr
+                    </button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle"></i> No books found yet. Click "Re-scan Now" to search for books.
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.search-prowlarr').forEach(button => {
+    button.addEventListener('click', function() {
+        const bookId = this.getAttribute('data-book-id');
+        const btn = this;
+        
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Searching...';
+        
+        fetch(`/books/${bookId}/search-prowlarr`, {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.url) {
+                window.open(data.url, '_blank');
+                btn.innerHTML = '<i class="bi bi-check-circle"></i> Opened in Prowlarr';
+                btn.classList.remove('btn-primary');
+                btn.classList.add('btn-success');
+            } else {
+                btn.innerHTML = '<i class="bi bi-x-circle"></i> Search failed';
+                btn.classList.remove('btn-primary');
+                btn.classList.add('btn-danger');
+            }
+        })
+        .catch(error => {
+            btn.innerHTML = '<i class="bi bi-x-circle"></i> Error';
+            btn.classList.remove('btn-primary');
+            btn.classList.add('btn-danger');
+        });
+    });
+});
+</script>
+{% endblock %}

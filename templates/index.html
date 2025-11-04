@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}Authors - BookScout{% endblock %}
+
+{% block content %}
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+<div class="row mb-4">
+    <div class="col">
+        <h1><i class="bi bi-people"></i> Author Watchlist</h1>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-4 mb-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h2 class="display-4">{{ authors|length }}</h2>
+                <p class="text-muted mb-0">Authors Monitored</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h2 class="display-4">{{ authors|selectattr('last_scanned')|list|length }}</h2>
+                <p class="text-muted mb-0">Scanned</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h2 class="display-4">{{ authors|rejectattr('last_scanned')|list|length }}</h2>
+                <p class="text-muted mb-0">Pending Scan</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Add New Author</h5>
+                <form action="{{ url_for('add_author') }}" method="POST">
+                    <div class="input-group">
+                        <input type="text" class="form-control" name="author_name" 
+                               placeholder="Author name (e.g., Andrew Rowe)" required>
+                        <button class="btn btn-primary" type="submit">
+                            <i class="bi bi-plus-circle"></i> Add & Scan
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Bulk Import</h5>
+                <p class="text-muted mb-3">Import all authors from your Audiobookshelf library</p>
+                <form action="{{ url_for('bulk_import_authors') }}" method="POST" 
+                      onsubmit="return confirm('This will import all authors from Audiobookshelf. This may take a while. Continue?');">
+                    <button class="btn btn-success w-100" type="submit">
+                        <i class="bi bi-cloud-download"></i> Import from Audiobookshelf
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    {% if authors %}
+        {% for author in authors %}
+        <div class="col-md-6 col-lg-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">{{ author.name }}</h5>
+                    {% if author.last_scanned %}
+                        <p class="card-text text-muted">
+                            <small>Last scanned: {{ author.last_scanned[:16] }}</small>
+                        </p>
+                    {% else %}
+                        <p class="card-text text-muted">
+                            <small>Never scanned</small>
+                        </p>
+                    {% endif %}
+                    <div class="btn-group" role="group">
+                        <a href="{{ url_for('view_author', author_id=author.id) }}" 
+                           class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-eye"></i> View Books
+                        </a>
+                        <a href="{{ url_for('scan_author', author_id=author.id) }}" 
+                           class="btn btn-sm btn-outline-success">
+                            <i class="bi bi-arrow-repeat"></i> Scan
+                        </a>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" 
+                                data-bs-toggle="modal" data-bs-target="#editModal{{ author.id }}">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <form action="{{ url_for('delete_author', author_id=author.id) }}" 
+                              method="POST" style="display: inline;"
+                              onsubmit="return confirm('Remove {{ author.name }} from watchlist?');">
+                            <button type="submit" class="btn btn-sm btn-outline-danger">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Edit Modal for {{ author.name }} -->
+        <div class="modal fade" id="editModal{{ author.id }}" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Edit Author Name</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <form action="{{ url_for('edit_author', author_id=author.id) }}" method="POST">
+                        <div class="modal-body">
+                            <input type="text" class="form-control" name="author_name" 
+                                   value="{{ author.name }}" required>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="submit" class="btn btn-primary">Save</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="col-12">
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i> No authors in your watchlist yet. Add one above to get started!
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
