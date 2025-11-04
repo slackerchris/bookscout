@@ -39,6 +39,9 @@
                     <i class="bi bi-funnel"></i> Show Missing Only
                 </a>
             {% endif %}
+            <a href="{{ url_for('view_duplicates', author_id=author.id) }}" class="btn btn-outline-danger">
+                <i class="bi bi-files"></i> Manage Duplicates
+            </a>
             <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#editAuthorModal">
                 <i class="bi bi-pencil"></i> Edit Name
             </button>
@@ -114,11 +117,11 @@
                         <i class="bi bi-book text-white" style="font-size: 3rem;"></i>
                     </div>
                 {% endif %}
-                {% if book.have_it %}
-                    <span class="badge bg-success have-badge">
-                        <i class="bi bi-check-circle"></i> Have
-                    </span>
-                {% endif %}
+                <button class="btn btn-sm position-absolute top-0 end-0 m-2 toggle-owned-btn {% if book.have_it %}btn-success{% else %}btn-outline-light{% endif %}" 
+                        data-book-id="{{ book.id }}"
+                        title="{% if book.have_it %}Mark as not owned{% else %}Mark as owned{% endif %}">
+                    <i class="bi bi-{% if book.have_it %}check-circle-fill{% else %}circle{% endif %}"></i>
+                </button>
             </div>
             <div class="card-body">
                 <h6 class="card-title">{{ book.title }}</h6>
@@ -245,6 +248,48 @@
 
 {% block scripts %}
 <script>
+// Toggle book owned status
+document.querySelectorAll('.toggle-owned-btn').forEach(button => {
+    button.addEventListener('click', function(e) {
+        e.preventDefault();
+        const bookId = this.getAttribute('data-book-id');
+        const btn = this;
+        
+        fetch(`/books/${bookId}/toggle-owned`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Update button appearance
+                if (data.have_it) {
+                    btn.classList.remove('btn-outline-light');
+                    btn.classList.add('btn-success');
+                    btn.querySelector('i').classList.remove('bi-circle');
+                    btn.querySelector('i').classList.add('bi-check-circle-fill');
+                    btn.title = 'Mark as not owned';
+                } else {
+                    btn.classList.remove('btn-success');
+                    btn.classList.add('btn-outline-light');
+                    btn.querySelector('i').classList.remove('bi-check-circle-fill');
+                    btn.querySelector('i').classList.add('bi-circle');
+                    btn.title = 'Mark as owned';
+                }
+                
+                // Reload page to update counts
+                setTimeout(() => location.reload(), 500);
+            }
+        })
+        .catch(error => {
+            console.error('Error toggling book status:', error);
+            showToast('Failed to update book status', 'danger');
+        });
+    });
+});
+
 // Unified search functionality
 document.querySelectorAll('.unified-search-btn').forEach(button => {
     button.addEventListener('click', function() {

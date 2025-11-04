@@ -25,6 +25,32 @@
         <form method="POST">
             <div class="card mb-3">
                 <div class="card-header">
+                    <h5 class="mb-0">General Settings</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="language_filter" class="form-label">Language Filter</label>
+                        <select class="form-select" id="language_filter" name="language_filter">
+                            <option value="all" {% if settings.get('language_filter', 'all') == 'all' %}selected{% endif %}>All Languages</option>
+                            <option value="en" {% if settings.get('language_filter') == 'en' %}selected{% endif %}>English</option>
+                            <option value="es" {% if settings.get('language_filter') == 'es' %}selected{% endif %}>Spanish</option>
+                            <option value="fr" {% if settings.get('language_filter') == 'fr' %}selected{% endif %}>French</option>
+                            <option value="de" {% if settings.get('language_filter') == 'de' %}selected{% endif %}>German</option>
+                            <option value="it" {% if settings.get('language_filter') == 'it' %}selected{% endif %}>Italian</option>
+                            <option value="pt" {% if settings.get('language_filter') == 'pt' %}selected{% endif %}>Portuguese</option>
+                            <option value="ja" {% if settings.get('language_filter') == 'ja' %}selected{% endif %}>Japanese</option>
+                            <option value="zh" {% if settings.get('language_filter') == 'zh' %}selected{% endif %}>Chinese</option>
+                            <option value="ru" {% if settings.get('language_filter') == 'ru' %}selected{% endif %}>Russian</option>
+                        </select>
+                        <div class="form-text">
+                            Filter book results by language. Select "All Languages" to see books in any language.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card mb-3">
+                <div class="card-header">
                     <h5 class="mb-0">Audiobookshelf Integration</h5>
                 </div>
                 <div class="card-body">

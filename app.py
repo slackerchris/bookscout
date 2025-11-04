@@ -103,25 +103,53 @@ def init_db():
     # Migration: Add missing columns to existing tables
     cursor = db.cursor()
     
-    # Check if 'active' column exists in authors table
+    # Check and add missing columns to authors table
     cursor.execute("PRAGMA table_info(authors)")
     columns = [col[1] for col in cursor.fetchall()]
+    if 'openlibrary_id' not in columns:
+        db.execute('ALTER TABLE authors ADD COLUMN openlibrary_id TEXT')
+    if 'audible_id' not in columns:
+        db.execute('ALTER TABLE authors ADD COLUMN audible_id TEXT')
+    if 'goodreads_id' not in columns:
+        db.execute('ALTER TABLE authors ADD COLUMN goodreads_id TEXT')
+    if 'last_scanned' not in columns:
+        db.execute('ALTER TABLE authors ADD COLUMN last_scanned TIMESTAMP')
     if 'active' not in columns:
         db.execute('ALTER TABLE authors ADD COLUMN active INTEGER DEFAULT 1')
     
-    # Check if 'series' and 'series_position' columns exist in books table
+    # Check and add missing columns to books table
     cursor.execute("PRAGMA table_info(books)")
     columns = [col[1] for col in cursor.fetchall()]
+    if 'subtitle' not in columns:
+        db.execute('ALTER TABLE books ADD COLUMN subtitle TEXT')
+    if 'isbn' not in columns:
+        db.execute('ALTER TABLE books ADD COLUMN isbn TEXT')
+    if 'isbn13' not in columns:
+        db.execute('ALTER TABLE books ADD COLUMN isbn13 TEXT')
+    if 'asin' not in columns:
+        db.execute('ALTER TABLE books ADD COLUMN asin TEXT')
+    if 'release_date' not in columns:
+        db.execute('ALTER TABLE books ADD COLUMN release_date TEXT')
+    if 'format' not in columns:
+        db.execute('ALTER TABLE books ADD COLUMN format TEXT')
+    if 'source' not in columns:
+        db.execute('ALTER TABLE books ADD COLUMN source TEXT')
+    if 'cover_url' not in columns:
+        db.execute('ALTER TABLE books ADD COLUMN cover_url TEXT')
+    if 'description' not in columns:
+        db.execute('ALTER TABLE books ADD COLUMN description TEXT')
     if 'series' not in columns:
         db.execute('ALTER TABLE books ADD COLUMN series TEXT')
     if 'series_position' not in columns:
         db.execute('ALTER TABLE books ADD COLUMN series_position TEXT')
+    if 'have_it' not in columns:
+        db.execute('ALTER TABLE books ADD COLUMN have_it INTEGER DEFAULT 0')
     
     db.commit()
     db.close()
 
 
-def query_openlibrary(author_name: str) -> List[Dict]:
+def query_openlibrary(author_name: str, language_filter: str = None) -> List[Dict]:
     """Query Open Library API for books by author"""
     try:
         response = requests.get(
@@ -134,6 +162,14 @@ def query_openlibrary(author_name: str) -> List[Dict]:
         
         books = []
         for doc in data.get('docs', []):
+            # OpenLibrary uses 'language' field (list of language codes)
+            book_languages = doc.get('language', ['en'])
+            
+            # Skip if language filter is set and doesn't match any of the book's languages
+            if language_filter and language_filter != 'all':
+                if language_filter not in book_languages:
+                    continue
+            
             book = {
                 'title': doc.get('title', ''),
                 'subtitle': doc.get('subtitle', ''),
@@ -141,6 +177,7 @@ def query_openlibrary(author_name: str) -> List[Dict]:
                 'isbn13': next((isbn for isbn in doc.get('isbn', []) if len(isbn) == 13), None),
                 'release_date': str(doc.get('first_publish_year', '')),
                 'cover_url': f"https://covers.openlibrary.org/b/id/{doc.get('cover_i')}-M.jpg" if doc.get('cover_i') else None,
+                'language': book_languages[0] if book_languages else 'en',
                 'source': 'OpenLibrary'
             }
             if book['title']:
@@ -152,12 +189,18 @@ def query_openlibrary(author_name: str) -> List[Dict]:
         return []
 
 
-def query_google_books(author_name: str) -> List[Dict]:
+def query_google_books(author_name: str, language_filter: str = None) -> List[Dict]:
     """Query Google Books API for books by author"""
     try:
+        params = {'q': f'inauthor:"{author_name}"', 'maxResults': 40}
+        
+        # Add language restriction if specified
+        if language_filter and language_filter != 'all':
+            params['langRestrict'] = language_filter
+        
         response = requests.get(
             GOOGLE_BOOKS_API,
-            params={'q': f'inauthor:"{author_name}"', 'maxResults': 40},
+            params=params,
             timeout=10
         )
         response.raise_for_status()
@@ -169,6 +212,12 @@ def query_google_books(author_name: str) -> List[Dict]:
             identifiers = {id_info['type']: id_info['identifier'] 
                           for id_info in vol_info.get('industryIdentifiers', [])}
             
+            book_lang = vol_info.get('language', 'en')
+            
+            # Skip if language filter is set and doesn't match
+            if language_filter and language_filter != 'all' and book_lang != language_filter:
+                continue
+            
             book = {
                 'title': vol_info.get('title', ''),
                 'subtitle': vol_info.get('subtitle', ''),
@@ -177,6 +226,7 @@ def query_google_books(author_name: str) -> List[Dict]:
                 'release_date': vol_info.get('publishedDate', ''),
                 'cover_url': vol_info.get('imageLinks', {}).get('thumbnail'),
                 'description': vol_info.get('description', ''),
+                'language': book_lang,
                 'source': 'GoogleBooks'
             }
             if book['title']:
@@ -188,7 +238,7 @@ def query_google_books(author_name: str) -> List[Dict]:
         return []
 
 
-def query_audnexus(author_name: str) -> List[Dict]:
+def query_audnexus(author_name: str, language_filter: str = None) -> List[Dict]:
     """Query Audnexus API for audiobooks by author"""
     try:
         # First search for author
@@ -206,6 +256,10 @@ def query_audnexus(author_name: str) -> List[Dict]:
         
         # Extract books from search results
         for item in search_data.get('results', [])[:40]:  # Limit results
+            # Audnexus doesn't provide language info in search results
+            # We'll assume audiobooks from Audible are mostly English unless specified
+            # Could enhance this by fetching full book details for language check
+            
             book = {
                 'title': item.get('title', ''),
                 'subtitle': item.get('subtitle', ''),
@@ -213,6 +267,7 @@ def query_audnexus(author_name: str) -> List[Dict]:
                 'release_date': item.get('releaseDate', ''),
                 'cover_url': item.get('image'),
                 'format': 'audiobook',
+                'language': 'en',  # Default to English for audiobooks
                 'source': 'Audnexus'
             }
             if book['title']:
@@ -1154,11 +1209,15 @@ def scan_author(author_id):
     
     author_name = author['name']
     
+    # Get language filter from settings
+    settings = get_settings_from_db()
+    language_filter = settings.get('language_filter', 'all')
+    
     # Query all sources
-    print(f"Scanning for books by {author_name}...")
-    openlibrary_books = query_openlibrary(author_name)
-    google_books = query_google_books(author_name)
-    audnexus_books = query_audnexus(author_name)
+    print(f"Scanning for books by {author_name}... (language filter: {language_filter})")
+    openlibrary_books = query_openlibrary(author_name, language_filter)
+    google_books = query_google_books(author_name, language_filter)
+    audnexus_books = query_audnexus(author_name, language_filter)
     
     # Merge results
     all_books = merge_books([openlibrary_books, google_books, audnexus_books])
@@ -1183,11 +1242,36 @@ def scan_author(author_id):
     new_books = 0
     updated_books = 0
     for book in all_books:
-        # Check if book already exists
-        existing = db.execute(
-            'SELECT id FROM books WHERE author_id = ? AND title = ?',
-            (author_id, book['title'])
-        ).fetchone()
+        # Check if book already exists - prioritize ISBN/ASIN over title
+        existing = None
+        
+        # First try to find by ISBN13
+        if book.get('isbn13'):
+            existing = db.execute(
+                'SELECT id FROM books WHERE author_id = ? AND isbn13 = ?',
+                (author_id, book['isbn13'])
+            ).fetchone()
+        
+        # Then try ISBN
+        if not existing and book.get('isbn'):
+            existing = db.execute(
+                'SELECT id FROM books WHERE author_id = ? AND isbn = ?',
+                (author_id, book['isbn'])
+            ).fetchone()
+        
+        # Then try ASIN
+        if not existing and book.get('asin'):
+            existing = db.execute(
+                'SELECT id FROM books WHERE author_id = ? AND asin = ?',
+                (author_id, book['asin'])
+            ).fetchone()
+        
+        # Finally fall back to title matching
+        if not existing:
+            existing = db.execute(
+                'SELECT id FROM books WHERE author_id = ? AND title = ?',
+                (author_id, book['title'])
+            ).fetchone()
         
         if not existing:
             db.execute('''
@@ -1204,11 +1288,31 @@ def scan_author(author_id):
             ))
             new_books += 1
         else:
-            # Update have_it status and series info for existing books
-            db.execute(
-                'UPDATE books SET have_it = ?, series = ?, series_position = ? WHERE id = ?',
-                (book.get('have_it', 0), book.get('series'), book.get('series_position'), existing['id'])
-            )
+            # Update existing book with new info (cover, series, have_it status, etc.)
+            db.execute('''
+                UPDATE books 
+                SET have_it = ?, 
+                    series = ?, 
+                    series_position = ?,
+                    cover_url = COALESCE(?, cover_url),
+                    subtitle = COALESCE(?, subtitle),
+                    description = COALESCE(?, description),
+                    asin = COALESCE(?, asin),
+                    isbn = COALESCE(?, isbn),
+                    isbn13 = COALESCE(?, isbn13)
+                WHERE id = ?
+            ''', (
+                book.get('have_it', 0), 
+                book.get('series'), 
+                book.get('series_position'),
+                book.get('cover_url'),
+                book.get('subtitle'),
+                book.get('description'),
+                book.get('asin'),
+                book.get('isbn'),
+                book.get('isbn13'),
+                existing['id']
+            ))
             updated_books += 1
     
     print(f"Scan complete: {new_books} new books, {updated_books} existing books updated")
@@ -1260,6 +1364,185 @@ def view_author(author_id):
     
     return render_template('author.html', author=author, books=books, 
                          books_by_series=books_by_series, show_missing_only=show_missing_only)
+
+
+@app.route('/authors/<int:author_id>/duplicates')
+def view_duplicates(author_id):
+    """View and manage duplicate books for an author"""
+    db = get_db()
+    author = db.execute('SELECT * FROM authors WHERE id = ?', (author_id,)).fetchone()
+    
+    if not author:
+        db.close()
+        return "Author not found", 404
+    
+    # Find potential duplicates using fuzzy title matching
+    all_books = db.execute(
+        'SELECT * FROM books WHERE author_id = ? ORDER BY title',
+        (author_id,)
+    ).fetchall()
+    
+    # Group books that might be duplicates
+    duplicate_groups = []
+    processed = set()
+    
+    for i, book1 in enumerate(all_books):
+        if book1['id'] in processed:
+            continue
+            
+        group = [dict(book1)]
+        processed.add(book1['id'])
+        
+        for book2 in all_books[i+1:]:
+            if book2['id'] in processed:
+                continue
+            
+            # Check if books are duplicates
+            is_duplicate = False
+            
+            # Same ISBN13, ISBN, or ASIN
+            if book1['isbn13'] and book2['isbn13'] and book1['isbn13'] == book2['isbn13']:
+                is_duplicate = True
+            elif book1['isbn'] and book2['isbn'] and book1['isbn'] == book2['isbn']:
+                is_duplicate = True
+            elif book1['asin'] and book2['asin'] and book1['asin'] == book2['asin']:
+                is_duplicate = True
+            # Very similar titles (normalize and compare)
+            else:
+                title1 = book1['title'].lower().strip()
+                title2 = book2['title'].lower().strip()
+                # Remove common punctuation for comparison
+                for char in [':', ',', '-', '!', '?', '.']:
+                    title1 = title1.replace(char, ' ')
+                    title2 = title2.replace(char, ' ')
+                # Remove extra spaces
+                title1 = ' '.join(title1.split())
+                title2 = ' '.join(title2.split())
+                
+                # Check if titles are very similar (one contains the other or 90% word overlap)
+                if title1 in title2 or title2 in title1:
+                    is_duplicate = True
+                else:
+                    words1 = set(title1.split())
+                    words2 = set(title2.split())
+                    if len(words1) > 0 and len(words2) > 0:
+                        overlap = len(words1 & words2)
+                        similarity = overlap / max(len(words1), len(words2))
+                        if similarity >= 0.9:
+                            is_duplicate = True
+            
+            if is_duplicate:
+                group.append(dict(book2))
+                processed.add(book2['id'])
+        
+        # Only add groups with 2+ books
+        if len(group) > 1:
+            duplicate_groups.append(group)
+    
+    db.close()
+    
+    return render_template('duplicates.html', author=author, duplicate_groups=duplicate_groups)
+
+
+@app.route('/books/merge', methods=['POST'])
+def merge_duplicate_books():
+    """Merge multiple books into one, keeping the primary and deleting others"""
+    primary_id = request.form.get('primary_id', type=int)
+    duplicate_ids = request.form.getlist('duplicate_ids[]', type=int)
+    
+    if not primary_id or not duplicate_ids:
+        return jsonify({'error': 'Missing required fields'}), 400
+    
+    db = get_db()
+    
+    try:
+        # Get primary book
+        primary = db.execute('SELECT * FROM books WHERE id = ?', (primary_id,)).fetchone()
+        if not primary:
+            db.close()
+            return jsonify({'error': 'Primary book not found'}), 404
+        
+        # Merge data from duplicates into primary
+        for dup_id in duplicate_ids:
+            if dup_id == primary_id:
+                continue
+            
+            duplicate = db.execute('SELECT * FROM books WHERE id = ?', (dup_id,)).fetchone()
+            if not duplicate:
+                continue
+            
+            # Update primary with any missing fields from duplicate
+            update_fields = []
+            update_values = []
+            
+            for field in ['subtitle', 'isbn', 'isbn13', 'asin', 'cover_url', 'description', 'series', 'series_position']:
+                if not primary[field] and duplicate[field]:
+                    update_fields.append(f'{field} = ?')
+                    update_values.append(duplicate[field])
+            
+            # Keep have_it if any duplicate has it
+            if duplicate['have_it'] and not primary['have_it']:
+                update_fields.append('have_it = ?')
+                update_values.append(1)
+            
+            if update_fields:
+                update_values.append(primary_id)
+                db.execute(f"UPDATE books SET {', '.join(update_fields)} WHERE id = ?", update_values)
+            
+            # Delete the duplicate
+            db.execute('DELETE FROM books WHERE id = ?', (dup_id,))
+        
+        db.commit()
+        db.close()
+        
+        return jsonify({'success': True, 'message': f'Merged {len(duplicate_ids)} books'})
+        
+    except Exception as e:
+        db.close()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/books/delete', methods=['POST'])
+def delete_books():
+    """Delete multiple books"""
+    book_ids = request.form.getlist('book_ids[]', type=int)
+    
+    if not book_ids:
+        return jsonify({'error': 'No books specified'}), 400
+    
+    db = get_db()
+    
+    try:
+        for book_id in book_ids:
+            db.execute('DELETE FROM books WHERE id = ?', (book_id,))
+        
+        db.commit()
+        db.close()
+        
+        return jsonify({'success': True, 'message': f'Deleted {len(book_ids)} books'})
+        
+    except Exception as e:
+        db.close()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/books/<int:book_id>/toggle-owned', methods=['POST'])
+def toggle_book_owned(book_id):
+    """Toggle the have_it status of a book"""
+    db = get_db()
+    book = db.execute('SELECT have_it, author_id FROM books WHERE id = ?', (book_id,)).fetchone()
+    
+    if not book:
+        db.close()
+        return jsonify({'error': 'Book not found'}), 404
+    
+    # Toggle the status
+    new_status = 0 if book['have_it'] else 1
+    db.execute('UPDATE books SET have_it = ? WHERE id = ?', (new_status, book_id))
+    db.commit()
+    db.close()
+    
+    return jsonify({'success': True, 'have_it': new_status})
 
 
 @app.route('/books/<int:book_id>/search-prowlarr', methods=['POST'])
@@ -1353,6 +1636,7 @@ def settings():
         db = get_db()
         
         settings_to_save = [
+            'language_filter',
             'audiobookshelf_url',
             'audiobookshelf_token',
             'prowlarr_url',
