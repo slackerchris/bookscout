@@ -1,5 +1,28 @@
 # BookScout Changelog
 
+## [0.29.4] - 2025-11-05
+
+### Changed
+- **Version Numbering**: Reset to 0.x.x to indicate beta/personal-use status
+  - Major refactor would be needed for public release (ID-based authors, caching, etc.)
+  - Current version is stable and feature-complete for personal use
+
+### Added
+- **Duplicate Author Finder**: Find and merge duplicate authors
+  - Detects authors with similar names using normalization logic
+  - Identifies authors sharing books (same ASINs/ISBNs)
+  - UI to review and approve merges
+  - Moves all books to primary author, deactivates duplicates
+  - Accessible via "Duplicate Authors" in navigation
+
+### Fixed
+- **Audnexus Author Extraction**: Fetch complete author list from book details
+  - Search results only showed searched author name
+  - Now fetches full book details by ASIN to get all co-authors
+  - Enables proper co-author display for audiobooks
+
+---
+
 ## [2.9.3] - 2025-11-05
 
 ### Added

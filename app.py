@@ -2099,6 +2099,110 @@ def search_book_prowlarr(book_id):
         return jsonify({'error': 'Prowlarr search failed'}), 500
 
 
+@app.route('/duplicate-authors')
+def find_duplicate_authors():
+    """Find potential duplicate authors by analyzing shared books"""
+    db = get_db()
+    
+    # Get all authors with their books' ASINs/ISBNs
+    authors = db.execute('''
+        SELECT a.id, a.name, 
+               GROUP_CONCAT(DISTINCT b.asin) as asins,
+               GROUP_CONCAT(DISTINCT b.isbn13) as isbns,
+               COUNT(DISTINCT b.id) as book_count
+        FROM authors a
+        LEFT JOIN books b ON a.id = b.author_id AND (b.deleted IS NULL OR b.deleted = 0)
+        WHERE a.active = 1
+        GROUP BY a.id
+        ORDER BY a.name
+    ''').fetchall()
+    
+    # Find potential duplicates
+    duplicates = []
+    checked = set()
+    
+    for i, author1 in enumerate(authors):
+        if author1['id'] in checked:
+            continue
+            
+        author1_asins = set(author1['asins'].split(',') if author1['asins'] else [])
+        author1_isbns = set(author1['isbns'].split(',') if author1['isbns'] else [])
+        author1_asins.discard('')
+        author1_isbns.discard('')
+        
+        matches = []
+        
+        for author2 in authors[i+1:]:
+            if author2['id'] in checked:
+                continue
+            
+            # Check if names match using our normalization
+            if not author_names_match(author1['name'], author2['name']):
+                continue
+            
+            # Check for shared ASINs/ISBNs
+            author2_asins = set(author2['asins'].split(',') if author2['asins'] else [])
+            author2_isbns = set(author2['isbns'].split(',') if author2['isbns'] else [])
+            author2_asins.discard('')
+            author2_isbns.discard('')
+            
+            shared_asins = author1_asins & author2_asins
+            shared_isbns = author1_isbns & author2_isbns
+            
+            if shared_asins or shared_isbns or author_names_match(author1['name'], author2['name']):
+                matches.append({
+                    'id': author2['id'],
+                    'name': author2['name'],
+                    'book_count': author2['book_count'],
+                    'shared_books': len(shared_asins) + len(shared_isbns)
+                })
+                checked.add(author2['id'])
+        
+        if matches:
+            duplicates.append({
+                'primary': {
+                    'id': author1['id'],
+                    'name': author1['name'],
+                    'book_count': author1['book_count']
+                },
+                'matches': matches
+            })
+            checked.add(author1['id'])
+    
+    db.close()
+    return render_template('duplicate_authors.html', duplicates=duplicates)
+
+
+@app.route('/authors/merge', methods=['POST'])
+def merge_authors():
+    """Merge duplicate authors into one"""
+    db = get_db()
+    
+    primary_id = request.form.get('primary_id', type=int)
+    duplicate_ids = request.form.getlist('duplicate_ids[]', type=int)
+    
+    if not primary_id or not duplicate_ids:
+        db.close()
+        flash('Invalid merge request', 'danger')
+        return redirect(url_for('find_duplicate_authors'))
+    
+    try:
+        # Move all books from duplicates to primary author
+        for dup_id in duplicate_ids:
+            db.execute('UPDATE books SET author_id = ? WHERE author_id = ?', (primary_id, dup_id))
+            # Deactivate duplicate author
+            db.execute('UPDATE authors SET active = 0 WHERE id = ?', (dup_id,))
+        
+        db.commit()
+        db.close()
+        flash(f'Successfully merged {len(duplicate_ids)} duplicate author(s)', 'success')
+    except Exception as e:
+        db.close()
+        flash(f'Error merging authors: {str(e)}', 'danger')
+    
+    return redirect(url_for('find_duplicate_authors'))
+
+
 @app.route('/scan-all')
 def scan_all():
     """Scan all active authors"""

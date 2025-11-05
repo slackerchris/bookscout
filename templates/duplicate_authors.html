@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Find Duplicate Authors - BookScout{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-people"></i> Duplicate Authors</h2>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Back to Authors
+    </a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endwith %}
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i>
+    <strong>About Duplicate Detection:</strong> This tool finds authors with similar names or shared books (same ASINs/ISBNs). 
+    Review carefully before merging - some authors may have legitimately similar names!
+</div>
+
+{% if duplicates %}
+    <div class="accordion" id="duplicateAccordion">
+        {% for group in duplicates %}
+        <div class="accordion-item">
+            <h2 class="accordion-header">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" 
+                        data-bs-target="#collapse{{ loop.index }}">
+                    <strong>{{ group.primary.name }}</strong> 
+                    <span class="badge bg-primary ms-2">{{ group.primary.book_count }} books</span>
+                    <span class="badge bg-warning ms-2">{{ group.matches|length }} potential duplicate(s)</span>
+                </button>
+            </h2>
+            <div id="collapse{{ loop.index }}" class="accordion-collapse collapse" 
+                 data-bs-parent="#duplicateAccordion">
+                <div class="accordion-body">
+                    <form method="POST" action="{{ url_for('merge_authors') }}" 
+                          onsubmit="return confirm('Are you sure you want to merge these authors? This cannot be undone!');">
+                        <input type="hidden" name="primary_id" value="{{ group.primary.id }}">
+                        
+                        <div class="mb-3">
+                            <h5>Primary Author (Keep):</h5>
+                            <div class="card bg-success-subtle">
+                                <div class="card-body">
+                                    <strong>{{ group.primary.name }}</strong>
+                                    <span class="badge bg-primary">{{ group.primary.book_count }} books</span>
+                                    <a href="{{ url_for('view_author', author_id=group.primary.id) }}" 
+                                       class="btn btn-sm btn-outline-primary float-end" target="_blank">
+                                        View Books <i class="bi bi-box-arrow-up-right"></i>
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <h5>Potential Duplicates (Select to Merge):</h5>
+                            {% for match in group.matches %}
+                            <div class="card mb-2">
+                                <div class="card-body">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" 
+                                               name="duplicate_ids[]" value="{{ match.id }}" 
+                                               id="dup{{ match.id }}">
+                                        <label class="form-check-label" for="dup{{ match.id }}">
+                                            <strong>{{ match.name }}</strong>
+                                            <span class="badge bg-secondary">{{ match.book_count }} books</span>
+                                            {% if match.shared_books > 0 %}
+                                                <span class="badge bg-danger">{{ match.shared_books }} shared books!</span>
+                                            {% endif %}
+                                            <a href="{{ url_for('view_author', author_id=match.id) }}" 
+                                               class="btn btn-sm btn-outline-secondary float-end" target="_blank">
+                                                View Books <i class="bi bi-box-arrow-up-right"></i>
+                                            </a>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        
+                        <button type="submit" class="btn btn-warning">
+                            <i class="bi bi-arrow-bar-right"></i> Merge Selected into "{{ group.primary.name }}"
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="alert alert-success">
+        <i class="bi bi-check-circle"></i> No duplicate authors found! Your author list is clean.
+    </div>
+{% endif %}
+
+<div class="mt-4">
+    <h4>How Merging Works</h4>
+    <ul>
+        <li>All books from duplicate authors will be moved to the primary author</li>
+        <li>Duplicate author entries will be deactivated (not deleted)</li>
+        <li>Book metadata (ISBN, ASIN, series info) is preserved</li>
+        <li>This action cannot be easily undone - review carefully!</li>
+    </ul>
+</div>
+
+{% endblock %}
