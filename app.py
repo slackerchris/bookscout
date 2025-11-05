@@ -381,20 +381,32 @@ def query_audnexus(author_name: str, language_filter: str = None) -> List[Dict]:
         
         # Extract books from search results - increased limit for prolific authors
         for item in search_data.get('results', [])[:100]:  # Increased from 40 to 100
-            # Audnexus doesn't provide language info in search results
-            # We'll assume audiobooks from Audible are mostly English unless specified
-            # Could enhance this by fetching full book details for language check
+            asin = item.get('asin', '')
+            
+            # Fetch full book details to get complete author list
+            authors_list = [author_name]  # Default to searched author
+            if asin:
+                try:
+                    detail_response = requests.get(f"{AUDNEXUS_API}/books/{asin}", timeout=10)
+                    if detail_response.status_code == 200:
+                        detail_data = detail_response.json()
+                        # Audnexus returns authors as array of name strings
+                        api_authors = detail_data.get('authors', [])
+                        if api_authors:
+                            authors_list = api_authors
+                except Exception as e:
+                    print(f"Error fetching Audnexus book details for {asin}: {e}")
             
             book = {
                 'title': item.get('title', ''),
                 'subtitle': item.get('subtitle', ''),
-                'asin': item.get('asin', ''),
+                'asin': asin,
                 'release_date': item.get('releaseDate', ''),
                 'cover_url': item.get('image'),
                 'format': 'audiobook',
                 'language': 'en',  # Default to English for audiobooks
                 'source': 'Audnexus',
-                'authors': [author_name]  # Audnexus search doesn't return author list
+                'authors': authors_list
             }
             if book['title']:
                 books.append(book)
