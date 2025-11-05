@@ -36,6 +36,7 @@ def inject_version():
 OPENLIBRARY_API = "https://openlibrary.org/search.json"
 GOOGLE_BOOKS_API = "https://www.googleapis.com/books/v1/volumes"
 AUDNEXUS_API = "https://api.audnex.us"
+ISBNDB_API = "https://api2.isbndb.com"
 
 # User configuration (to be set via env vars or UI)
 AUDIOBOOKSHELF_URL = os.getenv('AUDIOBOOKSHELF_URL', 'http://localhost:13378')
@@ -192,12 +193,16 @@ def query_openlibrary(author_name: str, language_filter: str = None) -> List[Dic
         return []
 
 
-def query_google_books(author_name: str, language_filter: str = None) -> List[Dict]:
+def query_google_books(author_name: str, language_filter: str = None, api_key: str = None) -> List[Dict]:
     """Query Google Books API for books by author"""
     try:
         # Google Books API max is 40 per request, but we can paginate
         # Start with maxResults=40 and consider pagination if needed
         params = {'q': f'inauthor:"{author_name}"', 'maxResults': 40}
+        
+        # Add API key if provided for higher rate limits
+        if api_key:
+            params['key'] = api_key
         
         # Add language restriction if specified
         if language_filter and language_filter != 'all':
@@ -299,6 +304,55 @@ def query_audnexus(author_name: str, language_filter: str = None) -> List[Dict]:
         return books
     except Exception as e:
         print(f"Error querying Audnexus: {e}")
+        return []
+
+
+def query_isbndb(author_name: str, api_key: str, language_filter: str = None) -> List[Dict]:
+    """Query ISBNdb API for books by author (premium service)"""
+    if not api_key:
+        return []
+    
+    try:
+        headers = {'Authorization': api_key}
+        response = requests.get(
+            f"{ISBNDB_API}/author/{author_name}",
+            headers=headers,
+            params={'page': 1, 'pageSize': 100},
+            timeout=15
+        )
+        
+        if response.status_code != 200:
+            print(f"ISBNdb API error: {response.status_code}")
+            return []
+        
+        data = response.json()
+        books = []
+        
+        for item in data.get('books', []):
+            # ISBNdb has good language data
+            book_lang = item.get('language', 'en')
+            
+            # Skip if language filter is set and doesn't match
+            if language_filter and language_filter != 'all' and book_lang != language_filter:
+                continue
+            
+            book = {
+                'title': item.get('title', ''),
+                'subtitle': item.get('title_long', '').replace(item.get('title', ''), '').strip(),
+                'isbn': item.get('isbn'),
+                'isbn13': item.get('isbn13'),
+                'release_date': item.get('date_published', ''),
+                'cover_url': item.get('image'),
+                'description': item.get('synopsis', ''),
+                'language': book_lang,
+                'source': 'ISBNdb'
+            }
+            if book['title']:
+                books.append(book)
+        
+        return books
+    except Exception as e:
+        print(f"Error querying ISBNdb: {e}")
         return []
 
 
@@ -1339,6 +1393,11 @@ def search_book_metadata(book_id):
         db.close()
         return jsonify({'success': False, 'error': 'Title and author required'}), 400
     
+    # Get premium API keys if configured
+    settings = get_settings_from_db()
+    google_api_key = settings.get('google_books_api_key', '')
+    isbndb_api_key = settings.get('isbndb_api_key', '')
+    
     results = []
     
     try:
@@ -1361,8 +1420,8 @@ def search_book_metadata(book_id):
                     'series_position': book_data.get('series_position')
                 })
         
-        # Search Google Books
-        gb_books = query_google_books(author, language_filter='all')
+        # Search Google Books (with API key if available)
+        gb_books = query_google_books(author, language_filter='all', api_key=google_api_key)
         for book_data in gb_books:
             if book_data['title'].lower().find(title.lower()) >= 0 or title.lower().find(book_data['title'].lower()) >= 0:
                 results.append({
@@ -1398,6 +1457,26 @@ def search_book_metadata(book_id):
                     'series': book_data.get('series'),
                     'series_position': book_data.get('series_position')
                 })
+        
+        # Search ISBNdb if API key is configured
+        if isbndb_api_key:
+            isbndb_books = query_isbndb(author, isbndb_api_key, language_filter='all')
+            for book_data in isbndb_books:
+                if book_data['title'].lower().find(title.lower()) >= 0 or title.lower().find(book_data['title'].lower()) >= 0:
+                    results.append({
+                        'source': 'ISBNdb',
+                        'title': book_data['title'],
+                        'subtitle': book_data.get('subtitle'),
+                        'isbn': book_data.get('isbn'),
+                        'isbn13': book_data.get('isbn13'),
+                        'asin': book_data.get('asin'),
+                        'release_date': book_data.get('release_date'),
+                        'format': book_data.get('format'),
+                        'cover_url': book_data.get('cover_url'),
+                        'description': book_data.get('description'),
+                        'series': book_data.get('series'),
+                        'series_position': book_data.get('series_position')
+                    })
         
         db.close()
         return jsonify({'success': True, 'results': results})
@@ -1498,14 +1577,33 @@ def scan_author(author_id):
     settings = get_settings_from_db()
     language_filter = settings.get('language_filter', 'all')
     
+    # Get premium API keys if configured
+    google_api_key = settings.get('google_books_api_key', '')
+    isbndb_api_key = settings.get('isbndb_api_key', '')
+    
     # Query all sources
     print(f"Scanning for books by {author_name}... (language filter: {language_filter})")
+    sources_to_merge = []
+    
+    # Free APIs
     openlibrary_books = query_openlibrary(author_name, language_filter)
-    google_books = query_google_books(author_name, language_filter)
+    sources_to_merge.append(openlibrary_books)
+    
+    google_books = query_google_books(author_name, language_filter, google_api_key)
+    sources_to_merge.append(google_books)
+    
     audnexus_books = query_audnexus(author_name, language_filter)
+    sources_to_merge.append(audnexus_books)
+    
+    # Premium APIs (if configured)
+    if isbndb_api_key:
+        print(f"  Using ISBNdb premium API...")
+        isbndb_books = query_isbndb(author_name, isbndb_api_key, language_filter)
+        sources_to_merge.append(isbndb_books)
+        print(f"  ISBNdb returned {len(isbndb_books)} books")
     
     # Merge results
-    all_books = merge_books([openlibrary_books, google_books, audnexus_books])
+    all_books = merge_books(sources_to_merge)
     
     # Check against Audiobookshelf and get series info
     for book in all_books:
@@ -1931,6 +2029,8 @@ def settings():
         
         settings_to_save = [
             'language_filter',
+            'isbndb_api_key',
+            'google_books_api_key',
             'audiobookshelf_url',
             'audiobookshelf_token',
             'prowlarr_url',

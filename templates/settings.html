@@ -51,6 +51,51 @@
             
             <div class="card mb-3">
                 <div class="card-header">
+                    <h5 class="mb-0">Premium API Keys <span class="badge bg-info">Optional</span></h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">
+                        Add premium API keys for enhanced book metadata and better search results.
+                    </p>
+                    
+                    <div class="mb-3">
+                        <label for="isbndb_api_key" class="form-label">
+                            ISBNdb API Key
+                            <a href="https://isbndb.com/isbn-database" target="_blank" class="text-decoration-none">
+                                <i class="bi bi-box-arrow-up-right small"></i>
+                            </a>
+                        </label>
+                        <input type="password" class="form-control" id="isbndb_api_key" 
+                               name="isbndb_api_key" 
+                               value="{{ settings.get('isbndb_api_key', '') }}"
+                               placeholder="Your ISBNdb API key">
+                        <div class="form-text">
+                            <strong>Premium Service:</strong> $10-50/month. Provides comprehensive ISBN metadata and better book coverage.
+                            <br><a href="https://isbndb.com/apidocs/v2" target="_blank">Get API Key</a>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="google_books_api_key" class="form-label">
+                            Google Books API Key
+                            <a href="https://console.cloud.google.com/apis/library/books.googleapis.com" target="_blank" class="text-decoration-none">
+                                <i class="bi bi-box-arrow-up-right small"></i>
+                            </a>
+                        </label>
+                        <input type="password" class="form-control" id="google_books_api_key" 
+                               name="google_books_api_key" 
+                               value="{{ settings.get('google_books_api_key', '') }}"
+                               placeholder="Your Google Books API key (optional)">
+                        <div class="form-text">
+                            <strong>Free tier available.</strong> API key increases rate limits and provides more consistent results.
+                            <br><a href="https://developers.google.com/books/docs/v1/using#APIKey" target="_blank">Get API Key</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card mb-3">
+                <div class="card-header">
                     <h5 class="mb-0">Audiobookshelf Integration</h5>
                 </div>
                 <div class="card-body">
