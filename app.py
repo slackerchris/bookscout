@@ -152,6 +152,73 @@ def init_db():
     db.close()
 
 
+def normalize_author_name(name: str) -> str:
+    """Normalize author name for comparison - handles initials, periods, spacing"""
+    import re
+    
+    # Convert to lowercase
+    normalized = name.lower().strip()
+    
+    # Remove all periods and extra spaces
+    normalized = re.sub(r'\.', '', normalized)
+    normalized = re.sub(r'\s+', ' ', normalized)
+    
+    # Remove common suffixes
+    normalized = re.sub(r'\s+(jr|sr|ii|iii|iv)$', '', normalized)
+    
+    return normalized.strip()
+
+
+def author_names_match(search_name: str, book_author: str) -> bool:
+    """Check if two author names match, accounting for variations in initials and formatting"""
+    # Normalize both names
+    search_normalized = normalize_author_name(search_name)
+    book_normalized = normalize_author_name(book_author)
+    
+    # Exact match after normalization
+    if search_normalized == book_normalized:
+        return True
+    
+    # Check if all words in one name are in the other
+    search_words = set(search_normalized.split())
+    book_words = set(book_normalized.split())
+    
+    # Allow if search name contains all words from book author or vice versa
+    if search_words.issubset(book_words) or book_words.issubset(search_words):
+        return True
+    
+    # Handle initials: "j n chaney" should match "john nicholas chaney"
+    # If search has single letters, they could be initials
+    search_parts = search_normalized.split()
+    book_parts = book_normalized.split()
+    
+    # Check if search name uses initials that match book author's full names
+    if all(len(part) == 1 for part in search_parts[:-1]):  # All but last name are single letters
+        # Last name must match
+        if search_parts[-1] == book_parts[-1]:
+            # Check if initials match first letters of book author's names
+            if len(search_parts) - 1 <= len(book_parts) - 1:
+                initials_match = all(
+                    search_parts[i] == book_parts[i][0]
+                    for i in range(len(search_parts) - 1)
+                )
+                if initials_match:
+                    return True
+    
+    # Check reverse: book author has initials, search has full names
+    if all(len(part) == 1 for part in book_parts[:-1]):
+        if book_parts[-1] == search_parts[-1]:
+            if len(book_parts) - 1 <= len(search_parts) - 1:
+                initials_match = all(
+                    book_parts[i] == search_parts[i][0]
+                    for i in range(len(book_parts) - 1)
+                )
+                if initials_match:
+                    return True
+    
+    return False
+
+
 def query_openlibrary(author_name: str, language_filter: str = None) -> List[Dict]:
     """Query Open Library API for books by author"""
     try:
@@ -167,26 +234,9 @@ def query_openlibrary(author_name: str, language_filter: str = None) -> List[Dic
         books = []
         for doc in data.get('docs', []):
             # Verify author name matches (OpenLibrary can return fuzzy matches)
-            # Be more strict to avoid false positives like "Andrew" matching "Andrew Rowe"
             author_names = doc.get('author_name', [])
             if author_names:
-                # Normalize both search name and book author names
-                search_name_normalized = author_name.lower().strip()
-                author_match = False
-                
-                for name in author_names:
-                    book_author_normalized = name.lower().strip()
-                    # Must be exact match or one contains the other with word boundaries
-                    if search_name_normalized == book_author_normalized:
-                        author_match = True
-                        break
-                    # Allow if search name contains all words from book author or vice versa
-                    search_words = set(search_name_normalized.split())
-                    book_words = set(book_author_normalized.split())
-                    if search_words.issubset(book_words) or book_words.issubset(search_words):
-                        author_match = True
-                        break
-                
+                author_match = any(author_names_match(author_name, name) for name in author_names)
                 if not author_match:
                     continue
             
@@ -265,23 +315,7 @@ def query_google_books(author_name: str, language_filter: str = None, api_key: s
             # Verify author name matches (Google Books should be accurate with inauthor:"" but double check)
             book_authors = vol_info.get('authors', [])
             if book_authors:
-                # Normalize both search name and book author names
-                search_name_normalized = author_name.lower().strip()
-                author_match = False
-                
-                for author in book_authors:
-                    book_author_normalized = author.lower().strip()
-                    # Must be exact match or one contains the other with word boundaries
-                    if search_name_normalized == book_author_normalized:
-                        author_match = True
-                        break
-                    # Allow if search name contains all words from book author or vice versa
-                    search_words = set(search_name_normalized.split())
-                    book_words = set(book_author_normalized.split())
-                    if search_words.issubset(book_words) or book_words.issubset(search_words):
-                        author_match = True
-                        break
-                
+                author_match = any(author_names_match(author_name, author) for author in book_authors)
                 if not author_match:
                     continue
             
