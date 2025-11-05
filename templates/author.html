@@ -287,7 +287,7 @@
                         <i class="bi bi-search"></i> Search
                     </button>
                     {% endif %}
-                    <div class="btn-group w-100" role="group">
+                    <div class="btn-group w-100 mb-1" role="group">
                         <button class="btn btn-sm btn-outline-secondary edit-book-btn" 
                                 data-book-id="{{ book.id }}"
                                 data-book-title="{{ book.title }}"
@@ -310,6 +310,11 @@
                             <i class="bi bi-info-circle"></i> Find Info
                         </button>
                     </div>
+                    <button class="btn btn-sm btn-outline-danger w-100 delete-book-btn"
+                            data-book-id="{{ book.id }}"
+                            data-book-title="{{ book.title }}">
+                        <i class="bi bi-trash"></i> Delete Book
+                    </button>
                 </div>
             </div>
         </div>
@@ -964,5 +969,35 @@ function applyMetadata(bookId, metadata) {
         showToast('Failed to apply metadata: ' + error, 'danger');
     });
 }
+
+// Delete book functionality
+document.querySelectorAll('.delete-book-btn').forEach(button => {
+    button.addEventListener('click', function() {
+        const bookId = this.getAttribute('data-book-id');
+        const bookTitle = this.getAttribute('data-book-title');
+        
+        if (confirm(`Are you sure you want to delete "${bookTitle}"?\n\nThis will permanently remove it from this author.`)) {
+            fetch('/books/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `book_ids[]=${bookId}`
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('Book deleted successfully', 'success');
+                    setTimeout(() => location.reload(), 500);
+                } else {
+                    showToast('Error: ' + (data.error || 'Failed to delete book'), 'danger');
+                }
+            })
+            .catch(error => {
+                showToast('Failed to delete book: ' + error, 'danger');
+            });
+        }
+    });
+});
 </script>
 {% endblock %}
