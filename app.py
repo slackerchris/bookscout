@@ -166,6 +166,30 @@ def query_openlibrary(author_name: str, language_filter: str = None) -> List[Dic
         
         books = []
         for doc in data.get('docs', []):
+            # Verify author name matches (OpenLibrary can return fuzzy matches)
+            # Be more strict to avoid false positives like "Andrew" matching "Andrew Rowe"
+            author_names = doc.get('author_name', [])
+            if author_names:
+                # Normalize both search name and book author names
+                search_name_normalized = author_name.lower().strip()
+                author_match = False
+                
+                for name in author_names:
+                    book_author_normalized = name.lower().strip()
+                    # Must be exact match or one contains the other with word boundaries
+                    if search_name_normalized == book_author_normalized:
+                        author_match = True
+                        break
+                    # Allow if search name contains all words from book author or vice versa
+                    search_words = set(search_name_normalized.split())
+                    book_words = set(book_author_normalized.split())
+                    if search_words.issubset(book_words) or book_words.issubset(search_words):
+                        author_match = True
+                        break
+                
+                if not author_match:
+                    continue
+            
             # OpenLibrary uses 'language' field (list of language codes)
             book_languages = doc.get('language', ['en'])
             
@@ -237,6 +261,30 @@ def query_google_books(author_name: str, language_filter: str = None, api_key: s
         books = []
         for item in all_items:
             vol_info = item.get('volumeInfo', {})
+            
+            # Verify author name matches (Google Books should be accurate with inauthor:"" but double check)
+            book_authors = vol_info.get('authors', [])
+            if book_authors:
+                # Normalize both search name and book author names
+                search_name_normalized = author_name.lower().strip()
+                author_match = False
+                
+                for author in book_authors:
+                    book_author_normalized = author.lower().strip()
+                    # Must be exact match or one contains the other with word boundaries
+                    if search_name_normalized == book_author_normalized:
+                        author_match = True
+                        break
+                    # Allow if search name contains all words from book author or vice versa
+                    search_words = set(search_name_normalized.split())
+                    book_words = set(book_author_normalized.split())
+                    if search_words.issubset(book_words) or book_words.issubset(search_words):
+                        author_match = True
+                        break
+                
+                if not author_match:
+                    continue
+            
             identifiers = {id_info['type']: id_info['identifier'] 
                           for id_info in vol_info.get('industryIdentifiers', [])}
             
