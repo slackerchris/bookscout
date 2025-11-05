@@ -18,6 +18,15 @@
   - Audnexus: 40 → 100 results
   - Timeouts increased to 15 seconds
 
+### Fixed
+- **Author Name Normalization**: Handle author name variations and inconsistencies
+  - Handles initials with/without periods: "J.N. Chaney" vs "j n Chaney" vs "JN Chaney"
+  - Handles spacing variations: "j. n. Chaney" vs "j.n.chaney"
+  - Removes suffixes: Jr, Sr, II, III, IV for better matching
+  - Bidirectional initial matching: "j n chaney" matches "john nicholas chaney"
+  - Applied consistently across OpenLibrary and Google Books queries
+  - Reduces false positives while catching formatting variations
+
 ---
 
 ## [2.9.1] - 2025-11-05
