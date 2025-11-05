@@ -1197,6 +1197,268 @@ def edit_author(author_id):
     return redirect(url_for('view_author', author_id=author_id))
 
 
+@app.route('/authors/<int:author_id>/add-book', methods=['POST'])
+def add_book_manually(author_id):
+    """Manually add a book to an author"""
+    db = get_db()
+    
+    # Verify author exists
+    author = db.execute('SELECT id FROM authors WHERE id = ?', (author_id,)).fetchone()
+    if not author:
+        db.close()
+        flash('Author not found', 'danger')
+        return redirect(url_for('index'))
+    
+    # Get form data
+    title = request.form.get('title', '').strip()
+    subtitle = request.form.get('subtitle', '').strip() or None
+    series = request.form.get('series', '').strip() or None
+    series_position = request.form.get('series_position', '').strip() or None
+    isbn = request.form.get('isbn', '').strip() or None
+    isbn13 = request.form.get('isbn13', '').strip() or None
+    asin = request.form.get('asin', '').strip() or None
+    release_date = request.form.get('release_date', '').strip() or None
+    format_type = request.form.get('format', '').strip() or None
+    cover_url = request.form.get('cover_url', '').strip() or None
+    description = request.form.get('description', '').strip() or None
+    have_it = 1 if request.form.get('have_it') else 0
+    
+    if not title:
+        db.close()
+        flash('Book title is required', 'danger')
+        return redirect(url_for('view_author', author_id=author_id))
+    
+    try:
+        db.execute('''
+            INSERT INTO books (author_id, title, subtitle, isbn, isbn13, asin, 
+                              release_date, format, source, cover_url, description, 
+                              series, series_position, have_it)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            author_id, title, subtitle, isbn, isbn13, asin, 
+            release_date, format_type, 'Manual Entry', cover_url, description,
+            series, series_position, have_it
+        ))
+        db.commit()
+        db.close()
+        flash(f'Successfully added "{title}"', 'success')
+    except Exception as e:
+        db.close()
+        flash(f'Error adding book: {str(e)}', 'danger')
+    
+    return redirect(url_for('view_author', author_id=author_id))
+
+
+@app.route('/books/<int:book_id>/edit', methods=['POST'])
+def edit_book(book_id):
+    """Edit an existing book's details"""
+    db = get_db()
+    
+    # Verify book exists
+    book = db.execute('SELECT id FROM books WHERE id = ?', (book_id,)).fetchone()
+    if not book:
+        db.close()
+        return jsonify({'success': False, 'error': 'Book not found'}), 404
+    
+    # Get form data
+    title = request.form.get('title', '').strip()
+    subtitle = request.form.get('subtitle', '').strip() or None
+    series = request.form.get('series', '').strip() or None
+    series_position = request.form.get('series_position', '').strip() or None
+    isbn = request.form.get('isbn', '').strip() or None
+    isbn13 = request.form.get('isbn13', '').strip() or None
+    asin = request.form.get('asin', '').strip() or None
+    release_date = request.form.get('release_date', '').strip() or None
+    format_type = request.form.get('format', '').strip() or None
+    cover_url = request.form.get('cover_url', '').strip() or None
+    description = request.form.get('description', '').strip() or None
+    
+    if not title:
+        db.close()
+        return jsonify({'success': False, 'error': 'Book title is required'}), 400
+    
+    try:
+        db.execute('''
+            UPDATE books 
+            SET title = ?, subtitle = ?, series = ?, series_position = ?,
+                isbn = ?, isbn13 = ?, asin = ?, release_date = ?, format = ?,
+                cover_url = ?, description = ?
+            WHERE id = ?
+        ''', (
+            title, subtitle, series, series_position,
+            isbn, isbn13, asin, release_date, format_type,
+            cover_url, description, book_id
+        ))
+        db.commit()
+        db.close()
+        return jsonify({'success': True, 'message': 'Book updated successfully'})
+    except Exception as e:
+        db.close()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/books/<int:book_id>/search-metadata', methods=['POST'])
+def search_book_metadata(book_id):
+    """Search for metadata for a book across multiple APIs"""
+    db = get_db()
+    
+    # Verify book exists
+    book = db.execute('SELECT id FROM books WHERE id = ?', (book_id,)).fetchone()
+    if not book:
+        db.close()
+        return jsonify({'success': False, 'error': 'Book not found'}), 404
+    
+    data = request.get_json()
+    title = data.get('title', '').strip()
+    author = data.get('author', '').strip()
+    
+    if not title or not author:
+        db.close()
+        return jsonify({'success': False, 'error': 'Title and author required'}), 400
+    
+    results = []
+    
+    try:
+        # Search Open Library
+        ol_books = query_openlibrary(author, language_filter='all')
+        for book_data in ol_books:
+            if book_data['title'].lower().find(title.lower()) >= 0 or title.lower().find(book_data['title'].lower()) >= 0:
+                results.append({
+                    'source': 'OpenLibrary',
+                    'title': book_data['title'],
+                    'subtitle': book_data.get('subtitle'),
+                    'isbn': book_data.get('isbn'),
+                    'isbn13': book_data.get('isbn13'),
+                    'asin': book_data.get('asin'),
+                    'release_date': book_data.get('release_date'),
+                    'format': book_data.get('format'),
+                    'cover_url': book_data.get('cover_url'),
+                    'description': book_data.get('description'),
+                    'series': book_data.get('series'),
+                    'series_position': book_data.get('series_position')
+                })
+        
+        # Search Google Books
+        gb_books = query_google_books(author, language_filter='all')
+        for book_data in gb_books:
+            if book_data['title'].lower().find(title.lower()) >= 0 or title.lower().find(book_data['title'].lower()) >= 0:
+                results.append({
+                    'source': 'GoogleBooks',
+                    'title': book_data['title'],
+                    'subtitle': book_data.get('subtitle'),
+                    'isbn': book_data.get('isbn'),
+                    'isbn13': book_data.get('isbn13'),
+                    'asin': book_data.get('asin'),
+                    'release_date': book_data.get('release_date'),
+                    'format': book_data.get('format'),
+                    'cover_url': book_data.get('cover_url'),
+                    'description': book_data.get('description'),
+                    'series': book_data.get('series'),
+                    'series_position': book_data.get('series_position')
+                })
+        
+        # Search Audnexus
+        audnexus_books = query_audnexus(author, language_filter='all')
+        for book_data in audnexus_books:
+            if book_data['title'].lower().find(title.lower()) >= 0 or title.lower().find(book_data['title'].lower()) >= 0:
+                results.append({
+                    'source': 'Audnexus',
+                    'title': book_data['title'],
+                    'subtitle': book_data.get('subtitle'),
+                    'isbn': book_data.get('isbn'),
+                    'isbn13': book_data.get('isbn13'),
+                    'asin': book_data.get('asin'),
+                    'release_date': book_data.get('release_date'),
+                    'format': book_data.get('format', 'audiobook'),
+                    'cover_url': book_data.get('cover_url'),
+                    'description': book_data.get('description'),
+                    'series': book_data.get('series'),
+                    'series_position': book_data.get('series_position')
+                })
+        
+        db.close()
+        return jsonify({'success': True, 'results': results})
+    except Exception as e:
+        db.close()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/books/<int:book_id>/apply-metadata', methods=['POST'])
+def apply_book_metadata(book_id):
+    """Apply selected metadata to a book"""
+    db = get_db()
+    
+    # Verify book exists
+    book = db.execute('SELECT id FROM books WHERE id = ?', (book_id,)).fetchone()
+    if not book:
+        db.close()
+        return jsonify({'success': False, 'error': 'Book not found'}), 404
+    
+    data = request.get_json()
+    
+    try:
+        # Update book with selected metadata
+        # Only update fields that are provided and not empty
+        update_fields = []
+        update_values = []
+        
+        if data.get('title'):
+            update_fields.append('title = ?')
+            update_values.append(data['title'])
+        
+        if data.get('subtitle'):
+            update_fields.append('subtitle = ?')
+            update_values.append(data['subtitle'])
+        
+        if data.get('series'):
+            update_fields.append('series = ?')
+            update_values.append(data['series'])
+        
+        if data.get('series_position'):
+            update_fields.append('series_position = ?')
+            update_values.append(data['series_position'])
+        
+        if data.get('isbn'):
+            update_fields.append('isbn = ?')
+            update_values.append(data['isbn'])
+        
+        if data.get('isbn13'):
+            update_fields.append('isbn13 = ?')
+            update_values.append(data['isbn13'])
+        
+        if data.get('asin'):
+            update_fields.append('asin = ?')
+            update_values.append(data['asin'])
+        
+        if data.get('release_date'):
+            update_fields.append('release_date = ?')
+            update_values.append(data['release_date'])
+        
+        if data.get('format'):
+            update_fields.append('format = ?')
+            update_values.append(data['format'])
+        
+        if data.get('cover_url'):
+            update_fields.append('cover_url = ?')
+            update_values.append(data['cover_url'])
+        
+        if data.get('description'):
+            update_fields.append('description = ?')
+            update_values.append(data['description'])
+        
+        if update_fields:
+            update_values.append(book_id)
+            query = f"UPDATE books SET {', '.join(update_fields)} WHERE id = ?"
+            db.execute(query, update_values)
+            db.commit()
+        
+        db.close()
+        return jsonify({'success': True, 'message': 'Metadata applied successfully'})
+    except Exception as e:
+        db.close()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/authors/<int:author_id>/scan')
 def scan_author(author_id):
     """Scan for books by specific author"""

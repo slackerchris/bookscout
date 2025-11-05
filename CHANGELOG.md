@@ -1,5 +1,30 @@
 # BookScout Changelog
 
+## [2.9.0] - 2025-01-XX
+
+### Added
+- **Manual Book Management**: Complete suite of manual book editing features
+  - Add books manually with comprehensive form (title, subtitle, series, ISBN, ASIN, release date, format, cover URL, description)
+  - Edit existing book details with pre-populated form
+  - Search book metadata across Open Library, Google Books, and Audnexus APIs
+  - Select and apply correct metadata from search results
+  - Edit and Find Info buttons on each book card
+- **Metadata Search**: Visual card-based results display showing:
+  - Book cover images
+  - All available identifiers (ISBN, ISBN-13, ASIN)
+  - Series information
+  - Release dates and formats
+  - Source badges (OpenLibrary, GoogleBooks, Audnexus)
+  - One-click "Use This" to apply selected metadata
+
+### Technical
+- New backend routes: `/books/<id>/edit`, `/books/<id>/search-metadata`, `/books/<id>/apply-metadata`
+- Smart metadata merging only updates non-empty fields
+- Search filters results by title similarity across all three APIs
+- Complete JavaScript handlers for edit and metadata search workflows
+
+---
+
 ## [2.4.0] - 2025-11-03
 
 ### Fixed
