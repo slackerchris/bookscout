@@ -147,6 +147,8 @@ def init_db():
         db.execute('ALTER TABLE books ADD COLUMN have_it INTEGER DEFAULT 0')
     if 'deleted' not in columns:
         db.execute('ALTER TABLE books ADD COLUMN deleted INTEGER DEFAULT 0')
+    if 'co_authors' not in columns:
+        db.execute('ALTER TABLE books ADD COLUMN co_authors TEXT')
     
     db.commit()
     db.close()
@@ -256,7 +258,8 @@ def query_openlibrary(author_name: str, language_filter: str = None) -> List[Dic
                 'release_date': str(doc.get('first_publish_year', '')),
                 'cover_url': f"https://covers.openlibrary.org/b/id/{doc.get('cover_i')}-M.jpg" if doc.get('cover_i') else None,
                 'language': book_languages[0] if book_languages else 'en',
-                'source': 'OpenLibrary'
+                'source': 'OpenLibrary',
+                'authors': author_names  # Include all authors from API
             }
             if book['title']:
                 books.append(book)
@@ -337,7 +340,8 @@ def query_google_books(author_name: str, language_filter: str = None, api_key: s
                 'cover_url': vol_info.get('imageLinks', {}).get('thumbnail'),
                 'description': vol_info.get('description', ''),
                 'language': book_lang,
-                'source': 'GoogleBooks'
+                'source': 'GoogleBooks',
+                'authors': book_authors  # Include all authors from API
             }
             if book['title']:
                 books.append(book)
@@ -378,7 +382,8 @@ def query_audnexus(author_name: str, language_filter: str = None) -> List[Dict]:
                 'cover_url': item.get('image'),
                 'format': 'audiobook',
                 'language': 'en',  # Default to English for audiobooks
-                'source': 'Audnexus'
+                'source': 'Audnexus',
+                'authors': [author_name]  # Audnexus search doesn't return author list
             }
             if book['title']:
                 books.append(book)
@@ -427,7 +432,8 @@ def query_isbndb(author_name: str, api_key: str, language_filter: str = None) ->
                 'cover_url': item.get('image'),
                 'description': item.get('synopsis', ''),
                 'language': book_lang,
-                'source': 'ISBNdb'
+                'source': 'ISBNdb',
+                'authors': item.get('authors', [author_name])  # ISBNdb may include authors array
             }
             if book['title']:
                 books.append(book)
@@ -1371,6 +1377,7 @@ def add_book_manually(author_id):
     # Get form data
     title = request.form.get('title', '').strip()
     subtitle = request.form.get('subtitle', '').strip() or None
+    co_authors_text = request.form.get('co_authors', '').strip()
     series = request.form.get('series', '').strip() or None
     series_position = request.form.get('series_position', '').strip() or None
     isbn = request.form.get('isbn', '').strip() or None
@@ -1382,6 +1389,13 @@ def add_book_manually(author_id):
     description = request.form.get('description', '').strip() or None
     have_it = 1 if request.form.get('have_it') else 0
     
+    # Parse co-authors into JSON array
+    co_authors_json = None
+    if co_authors_text:
+        co_authors_list = [a.strip() for a in co_authors_text.split(',') if a.strip()]
+        if co_authors_list:
+            co_authors_json = json.dumps(co_authors_list)
+    
     if not title:
         db.close()
         flash('Book title is required', 'danger')
@@ -1391,12 +1405,12 @@ def add_book_manually(author_id):
         db.execute('''
             INSERT INTO books (author_id, title, subtitle, isbn, isbn13, asin, 
                               release_date, format, source, cover_url, description, 
-                              series, series_position, have_it)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              series, series_position, have_it, co_authors)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             author_id, title, subtitle, isbn, isbn13, asin, 
             release_date, format_type, 'Manual Entry', cover_url, description,
-            series, series_position, have_it
+            series, series_position, have_it, co_authors_json
         ))
         db.commit()
         db.close()
@@ -1422,6 +1436,7 @@ def edit_book(book_id):
     # Get form data
     title = request.form.get('title', '').strip()
     subtitle = request.form.get('subtitle', '').strip() or None
+    co_authors_text = request.form.get('co_authors', '').strip()
     series = request.form.get('series', '').strip() or None
     series_position = request.form.get('series_position', '').strip() or None
     isbn = request.form.get('isbn', '').strip() or None
@@ -1432,6 +1447,13 @@ def edit_book(book_id):
     cover_url = request.form.get('cover_url', '').strip() or None
     description = request.form.get('description', '').strip() or None
     
+    # Parse co-authors into JSON array
+    co_authors_json = None
+    if co_authors_text:
+        co_authors_list = [a.strip() for a in co_authors_text.split(',') if a.strip()]
+        if co_authors_list:
+            co_authors_json = json.dumps(co_authors_list)
+    
     if not title:
         db.close()
         return jsonify({'success': False, 'error': 'Book title is required'}), 400
@@ -1439,12 +1461,12 @@ def edit_book(book_id):
     try:
         db.execute('''
             UPDATE books 
-            SET title = ?, subtitle = ?, series = ?, series_position = ?,
+            SET title = ?, subtitle = ?, co_authors = ?, series = ?, series_position = ?,
                 isbn = ?, isbn13 = ?, asin = ?, release_date = ?, format = ?,
                 cover_url = ?, description = ?
             WHERE id = ?
         ''', (
-            title, subtitle, series, series_position,
+            title, subtitle, co_authors_json, series, series_position,
             isbn, isbn13, asin, release_date, format_type,
             cover_url, description, book_id
         ))
@@ -1744,23 +1766,35 @@ def scan_author(author_id):
             continue
         
         if not existing:
+            # Extract co-authors (all authors except the primary/scanned author)
+            all_authors = book.get('authors', [])
+            co_authors = [a for a in all_authors if not author_names_match(author_name, a)]
+            co_authors_json = json.dumps(co_authors) if co_authors else None
+            
             db.execute('''
                 INSERT INTO books (author_id, title, subtitle, isbn, isbn13, asin, 
                                   release_date, format, source, cover_url, description, 
-                                  series, series_position, have_it)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  series, series_position, have_it, co_authors)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 author_id, book['title'], book.get('subtitle'), book.get('isbn'),
                 book.get('isbn13'), book.get('asin'), book.get('release_date'),
                 book.get('format'), json.dumps(book['source']) if isinstance(book['source'], list) else book['source'],
                 book.get('cover_url'), book.get('description'),
-                book.get('series'), book.get('series_position'), book.get('have_it', 0)
+                book.get('series'), book.get('series_position'), book.get('have_it', 0),
+                co_authors_json
             ))
             new_books += 1
         else:
             # Update existing book with new info (cover, series, have_it status, etc.)
             # Use COALESCE to preserve existing data - only update empty fields
             # This protects manually edited books from being overwritten during rescan
+            
+            # Extract co-authors (all authors except the primary/scanned author)
+            all_authors = book.get('authors', [])
+            co_authors = [a for a in all_authors if not author_names_match(author_name, a)]
+            co_authors_json = json.dumps(co_authors) if co_authors else None
+            
             db.execute('''
                 UPDATE books 
                 SET have_it = ?, 
@@ -1771,7 +1805,8 @@ def scan_author(author_id):
                     description = COALESCE(description, ?),
                     asin = COALESCE(asin, ?),
                     isbn = COALESCE(isbn, ?),
-                    isbn13 = COALESCE(isbn13, ?)
+                    isbn13 = COALESCE(isbn13, ?),
+                    co_authors = COALESCE(co_authors, ?)
                 WHERE id = ?
             ''', (
                 book.get('have_it', 0), 
@@ -1783,6 +1818,7 @@ def scan_author(author_id):
                 book.get('asin'),
                 book.get('isbn'),
                 book.get('isbn13'),
+                co_authors_json,
                 existing['id']
             ))
             updated_books += 1

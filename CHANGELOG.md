@@ -1,5 +1,18 @@
 # BookScout Changelog
 
+## [2.9.3] - 2025-11-05
+
+### Added
+- **Co-Author Support**: Track and display multiple authors per book
+  - New `co_authors` JSON column stores additional authors beyond primary
+  - APIs automatically extract all authors from responses (OpenLibrary, Google Books)
+  - Co-authors displayed on book cards as "with [Author 2], [Author 3]"
+  - Manual add/edit forms include co-authors field (comma-separated input)
+  - Primary author concept: book belongs to one author (first/main), others shown as collaborators
+  - Similar to Readarr's author model for practical management
+
+---
+
 ## [2.9.2] - 2025-11-05
 
 ### Added

@@ -77,6 +77,12 @@
                         </div>
                     </div>
                     
+                    <div class="mb-3">
+                        <label for="book_co_authors" class="form-label">Co-Authors</label>
+                        <input type="text" class="form-control" id="book_co_authors" name="co_authors" placeholder="Comma-separated: Terry Maggert, Luke Daniels">
+                        <small class="form-text text-muted">Optional: Enter additional authors separated by commas</small>
+                    </div>
+                    
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
@@ -241,6 +247,14 @@
                 {% if book.subtitle %}
                     <p class="card-text text-muted small">{{ book.subtitle }}</p>
                 {% endif %}
+                {% if book.co_authors %}
+                    {% set co_author_list = book.co_authors | from_json %}
+                    {% if co_author_list %}
+                        <p class="card-text text-muted small mb-1">
+                            <i class="bi bi-people"></i> with {{ co_author_list | join(', ') }}
+                        </p>
+                    {% endif %}
+                {% endif %}
                 
                 <div class="mb-2">
                     {% if book.release_date %}
@@ -292,6 +306,7 @@
                                 data-book-id="{{ book.id }}"
                                 data-book-title="{{ book.title }}"
                                 data-book-subtitle="{{ book.subtitle or '' }}"
+                                data-book-co-authors="{% if book.co_authors %}{% set co_author_list = book.co_authors | from_json %}{{ co_author_list | join(', ') }}{% endif %}"
                                 data-book-series="{{ book.series or '' }}"
                                 data-book-series-position="{{ book.series_position or '' }}"
                                 data-book-isbn="{{ book.isbn or '' }}"
@@ -353,6 +368,12 @@
                                 <input type="text" class="form-control" id="edit_book_subtitle" name="subtitle">
                             </div>
                         </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="edit_book_co_authors" class="form-label">Co-Authors</label>
+                        <input type="text" class="form-control" id="edit_book_co_authors" name="co_authors" placeholder="Comma-separated: Terry Maggert, Luke Daniels">
+                        <small class="form-text text-muted">Optional: Enter additional authors separated by commas</small>
                     </div>
                     
                     <div class="row">
@@ -742,6 +763,7 @@ document.querySelectorAll('.edit-book-btn').forEach(button => {
         const bookId = this.getAttribute('data-book-id');
         const bookTitle = this.getAttribute('data-book-title');
         const bookSubtitle = this.getAttribute('data-book-subtitle');
+        const bookCoAuthors = this.getAttribute('data-book-co-authors');
         const bookSeries = this.getAttribute('data-book-series');
         const bookSeriesPosition = this.getAttribute('data-book-series-position');
         const bookIsbn = this.getAttribute('data-book-isbn');
@@ -756,6 +778,7 @@ document.querySelectorAll('.edit-book-btn').forEach(button => {
         document.getElementById('edit_book_id').value = bookId;
         document.getElementById('edit_book_title').value = bookTitle || '';
         document.getElementById('edit_book_subtitle').value = bookSubtitle || '';
+        document.getElementById('edit_book_co_authors').value = bookCoAuthors || '';
         document.getElementById('edit_book_series').value = bookSeries || '';
         document.getElementById('edit_book_series_position').value = bookSeriesPosition || '';
         document.getElementById('edit_book_isbn').value = bookIsbn || '';
