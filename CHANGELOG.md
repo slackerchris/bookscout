@@ -1,5 +1,25 @@
 # BookScout Changelog
 
+## [2.9.2] - 2025-11-05
+
+### Added
+- **Premium API Support**: Optional paid API keys in settings
+  - ISBNdb API key support ($10-50/month for comprehensive ISBN metadata)
+  - Google Books API key support (free, increases rate limits)
+  - Premium APIs integrated into author scanning and metadata search
+  - Settings UI shows links to API documentation and signup
+- **Delete Book Button**: Quick delete on each book card
+  - Red "Delete Book" button below Edit/Find Info buttons
+  - Confirmation dialog before deletion
+  - Easier to remove mismatched books without using Manage Duplicates
+- **Increased API Result Limits**: Better book discovery for prolific authors
+  - OpenLibrary: 100 → 200 results
+  - Google Books: 40 → 120 results (pagination over 3 pages)
+  - Audnexus: 40 → 100 results
+  - Timeouts increased to 15 seconds
+
+---
+
 ## [2.9.1] - 2025-11-05
 
 ### Fixed
