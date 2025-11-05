@@ -1551,17 +1551,19 @@ def scan_author(author_id):
             new_books += 1
         else:
             # Update existing book with new info (cover, series, have_it status, etc.)
+            # Use COALESCE to preserve existing data - only update empty fields
+            # This protects manually edited books from being overwritten during rescan
             db.execute('''
                 UPDATE books 
                 SET have_it = ?, 
-                    series = ?, 
-                    series_position = ?,
-                    cover_url = COALESCE(?, cover_url),
-                    subtitle = COALESCE(?, subtitle),
-                    description = COALESCE(?, description),
-                    asin = COALESCE(?, asin),
-                    isbn = COALESCE(?, isbn),
-                    isbn13 = COALESCE(?, isbn13)
+                    series = COALESCE(series, ?),
+                    series_position = COALESCE(series_position, ?),
+                    cover_url = COALESCE(cover_url, ?),
+                    subtitle = COALESCE(subtitle, ?),
+                    description = COALESCE(description, ?),
+                    asin = COALESCE(asin, ?),
+                    isbn = COALESCE(isbn, ?),
+                    isbn13 = COALESCE(isbn13, ?)
                 WHERE id = ?
             ''', (
                 book.get('have_it', 0), 
