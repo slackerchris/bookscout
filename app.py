@@ -154,10 +154,11 @@ def init_db():
 def query_openlibrary(author_name: str, language_filter: str = None) -> List[Dict]:
     """Query Open Library API for books by author"""
     try:
+        # Increase limit to get more books for prolific authors
         response = requests.get(
             OPENLIBRARY_API,
-            params={'author': author_name, 'limit': 100},
-            timeout=10
+            params={'author': author_name, 'limit': 200},
+            timeout=15
         )
         response.raise_for_status()
         data = response.json()
@@ -194,6 +195,8 @@ def query_openlibrary(author_name: str, language_filter: str = None) -> List[Dic
 def query_google_books(author_name: str, language_filter: str = None) -> List[Dict]:
     """Query Google Books API for books by author"""
     try:
+        # Google Books API max is 40 per request, but we can paginate
+        # Start with maxResults=40 and consider pagination if needed
         params = {'q': f'inauthor:"{author_name}"', 'maxResults': 40}
         
         # Add language restriction if specified
@@ -203,13 +206,31 @@ def query_google_books(author_name: str, language_filter: str = None) -> List[Di
         response = requests.get(
             GOOGLE_BOOKS_API,
             params=params,
-            timeout=10
+            timeout=15
         )
         response.raise_for_status()
         data = response.json()
         
+        # Collect all items - fetch up to 3 pages (120 results total)
+        all_items = data.get('items', [])
+        total_items = data.get('totalItems', 0)
+        
+        # Fetch additional pages if there are more results
+        if total_items > 40:
+            for start_index in [40, 80]:  # Page 2 and 3
+                if start_index < total_items:
+                    try:
+                        params['startIndex'] = start_index
+                        page_response = requests.get(GOOGLE_BOOKS_API, params=params, timeout=15)
+                        page_response.raise_for_status()
+                        page_data = page_response.json()
+                        all_items.extend(page_data.get('items', []))
+                    except Exception as e:
+                        print(f"Error fetching Google Books page {start_index}: {e}")
+                        break
+        
         books = []
-        for item in data.get('items', []):
+        for item in all_items:
             vol_info = item.get('volumeInfo', {})
             identifiers = {id_info['type']: id_info['identifier'] 
                           for id_info in vol_info.get('industryIdentifiers', [])}
@@ -256,8 +277,8 @@ def query_audnexus(author_name: str, language_filter: str = None) -> List[Dict]:
         search_data = search_response.json()
         books = []
         
-        # Extract books from search results
-        for item in search_data.get('results', [])[:40]:  # Limit results
+        # Extract books from search results - increased limit for prolific authors
+        for item in search_data.get('results', [])[:100]:  # Increased from 40 to 100
             # Audnexus doesn't provide language info in search results
             # We'll assume audiobooks from Audible are mostly English unless specified
             # Could enhance this by fetching full book details for language check
