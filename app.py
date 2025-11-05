@@ -27,6 +27,17 @@ def get_version():
     except:
         return 'unknown'
 
+# Add custom Jinja2 filter for JSON parsing
+@app.template_filter('from_json')
+def from_json_filter(value):
+    """Parse JSON string to Python object"""
+    if not value:
+        return []
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
 # Make version available to all templates
 @app.context_processor
 def inject_version():
