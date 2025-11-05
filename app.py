@@ -144,6 +144,8 @@ def init_db():
         db.execute('ALTER TABLE books ADD COLUMN series_position TEXT')
     if 'have_it' not in columns:
         db.execute('ALTER TABLE books ADD COLUMN have_it INTEGER DEFAULT 0')
+    if 'deleted' not in columns:
+        db.execute('ALTER TABLE books ADD COLUMN deleted INTEGER DEFAULT 0')
     
     db.commit()
     db.close()
@@ -1505,35 +1507,40 @@ def scan_author(author_id):
     updated_books = 0
     for book in all_books:
         # Check if book already exists - prioritize ISBN/ASIN over title
+        # Also check if it was deleted - skip deleted books entirely
         existing = None
         
         # First try to find by ISBN13
         if book.get('isbn13'):
             existing = db.execute(
-                'SELECT id FROM books WHERE author_id = ? AND isbn13 = ?',
+                'SELECT id, deleted FROM books WHERE author_id = ? AND isbn13 = ?',
                 (author_id, book['isbn13'])
             ).fetchone()
         
         # Then try ISBN
         if not existing and book.get('isbn'):
             existing = db.execute(
-                'SELECT id FROM books WHERE author_id = ? AND isbn = ?',
+                'SELECT id, deleted FROM books WHERE author_id = ? AND isbn = ?',
                 (author_id, book['isbn'])
             ).fetchone()
         
         # Then try ASIN
         if not existing and book.get('asin'):
             existing = db.execute(
-                'SELECT id FROM books WHERE author_id = ? AND asin = ?',
+                'SELECT id, deleted FROM books WHERE author_id = ? AND asin = ?',
                 (author_id, book['asin'])
             ).fetchone()
         
         # Finally fall back to title matching
         if not existing:
             existing = db.execute(
-                'SELECT id FROM books WHERE author_id = ? AND title = ?',
+                'SELECT id, deleted FROM books WHERE author_id = ? AND title = ?',
                 (author_id, book['title'])
             ).fetchone()
+        
+        # Skip if book was previously deleted (merged or intentionally removed)
+        if existing and existing['deleted']:
+            continue
         
         if not existing:
             db.execute('''
@@ -1607,12 +1614,12 @@ def view_author(author_id):
     
     if show_missing_only:
         books = db.execute(
-            'SELECT * FROM books WHERE author_id = ? AND have_it = 0 ORDER BY series, series_position, release_date DESC',
+            'SELECT * FROM books WHERE author_id = ? AND have_it = 0 AND (deleted IS NULL OR deleted = 0) ORDER BY series, series_position, release_date DESC',
             (author_id,)
         ).fetchall()
     else:
         books = db.execute(
-            'SELECT * FROM books WHERE author_id = ? ORDER BY series, series_position, release_date DESC',
+            'SELECT * FROM books WHERE author_id = ? AND (deleted IS NULL OR deleted = 0) ORDER BY series, series_position, release_date DESC',
             (author_id,)
         ).fetchall()
     
@@ -1642,7 +1649,7 @@ def view_duplicates(author_id):
     
     # Find potential duplicates using fuzzy title matching
     all_books = db.execute(
-        'SELECT * FROM books WHERE author_id = ? ORDER BY title',
+        'SELECT * FROM books WHERE author_id = ? AND (deleted IS NULL OR deleted = 0) ORDER BY title',
         (author_id,)
     ).fetchall()
     
@@ -1768,7 +1775,7 @@ def merge_duplicate_books():
 
 @app.route('/books/delete', methods=['POST'])
 def delete_books():
-    """Delete multiple books"""
+    """Mark multiple books as deleted (soft delete)"""
     book_ids = request.form.getlist('book_ids[]', type=int)
     
     if not book_ids:
@@ -1778,7 +1785,9 @@ def delete_books():
     
     try:
         for book_id in book_ids:
-            db.execute('DELETE FROM books WHERE id = ?', (book_id,))
+            # Mark as deleted instead of actually deleting
+            # This prevents them from being re-added during rescans
+            db.execute('UPDATE books SET deleted = 1 WHERE id = ?', (book_id,))
         
         db.commit()
         db.close()
