@@ -856,48 +856,90 @@ function displayMetadataResults(results, bookId) {
     const container = document.getElementById('metadataResultsContainer');
     container.innerHTML = '';
     
-    results.forEach(result => {
+    results.forEach((result, index) => {
         const card = document.createElement('div');
         card.className = 'col-md-4 mb-3';
         
-        const cardContent = `
-            <div class="card h-100">
-                ${result.cover_url ? `<img src="${result.cover_url}" class="card-img-top" style="max-height: 300px; object-fit: contain;" alt="${result.title}">` : ''}
-                <div class="card-body">
-                    <h6 class="card-title">${result.title}</h6>
-                    ${result.subtitle ? `<p class="card-text text-muted small">${result.subtitle}</p>` : ''}
-                    <div class="small">
-                        <strong>Source:</strong> <span class="badge bg-info">${result.source}</span><br>
-                        ${result.series ? `<strong>Series:</strong> ${result.series}${result.series_position ? ` #${result.series_position}` : ''}<br>` : ''}
-                        ${result.isbn ? `<strong>ISBN:</strong> ${result.isbn}<br>` : ''}
-                        ${result.isbn13 ? `<strong>ISBN-13:</strong> ${result.isbn13}<br>` : ''}
-                        ${result.asin ? `<strong>ASIN:</strong> ${result.asin}<br>` : ''}
-                        ${result.release_date ? `<strong>Released:</strong> ${result.release_date}<br>` : ''}
-                        ${result.format ? `<strong>Format:</strong> ${result.format}<br>` : ''}
-                    </div>
-                    ${result.description ? `<p class="card-text small mt-2" style="max-height: 100px; overflow: hidden;">${result.description.substring(0, 150)}...</p>` : ''}
-                </div>
-                <div class="card-footer">
-                    <button class="btn btn-sm btn-primary w-100 apply-metadata-btn"
-                            data-book-id="${bookId}"
-                            data-metadata='${JSON.stringify(result)}'>
-                        <i class="bi bi-check-circle"></i> Use This
-                    </button>
-                </div>
-            </div>
-        `;
+        // Escape HTML in text fields to prevent XSS
+        const escapeHtml = (text) => {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        };
         
-        card.innerHTML = cardContent;
-        container.appendChild(card);
-    });
-    
-    // Add event listeners to apply buttons
-    document.querySelectorAll('.apply-metadata-btn').forEach(btn => {
+        const cardDiv = document.createElement('div');
+        cardDiv.className = 'card h-100';
+        
+        // Add cover image if available
+        if (result.cover_url) {
+            const img = document.createElement('img');
+            img.src = result.cover_url;
+            img.className = 'card-img-top';
+            img.style.maxHeight = '300px';
+            img.style.objectFit = 'contain';
+            img.alt = result.title;
+            cardDiv.appendChild(img);
+        }
+        
+        // Card body
+        const cardBody = document.createElement('div');
+        cardBody.className = 'card-body';
+        
+        const title = document.createElement('h6');
+        title.className = 'card-title';
+        title.textContent = result.title;
+        cardBody.appendChild(title);
+        
+        if (result.subtitle) {
+            const subtitle = document.createElement('p');
+            subtitle.className = 'card-text text-muted small';
+            subtitle.textContent = result.subtitle;
+            cardBody.appendChild(subtitle);
+        }
+        
+        const details = document.createElement('div');
+        details.className = 'small';
+        details.innerHTML = `
+            <strong>Source:</strong> <span class="badge bg-info">${result.source}</span><br>
+            ${result.series ? `<strong>Series:</strong> ${escapeHtml(result.series)}${result.series_position ? ` #${escapeHtml(result.series_position)}` : ''}<br>` : ''}
+            ${result.isbn ? `<strong>ISBN:</strong> ${escapeHtml(result.isbn)}<br>` : ''}
+            ${result.isbn13 ? `<strong>ISBN-13:</strong> ${escapeHtml(result.isbn13)}<br>` : ''}
+            ${result.asin ? `<strong>ASIN:</strong> ${escapeHtml(result.asin)}<br>` : ''}
+            ${result.release_date ? `<strong>Released:</strong> ${escapeHtml(result.release_date)}<br>` : ''}
+            ${result.format ? `<strong>Format:</strong> ${escapeHtml(result.format)}<br>` : ''}
+        `;
+        cardBody.appendChild(details);
+        
+        if (result.description) {
+            const desc = document.createElement('p');
+            desc.className = 'card-text small mt-2';
+            desc.style.maxHeight = '100px';
+            desc.style.overflow = 'hidden';
+            desc.textContent = result.description.substring(0, 150) + '...';
+            cardBody.appendChild(desc);
+        }
+        
+        cardDiv.appendChild(cardBody);
+        
+        // Card footer with button
+        const cardFooter = document.createElement('div');
+        cardFooter.className = 'card-footer';
+        
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-sm btn-primary w-100';
+        btn.innerHTML = '<i class="bi bi-check-circle"></i> Use This';
+        btn.dataset.bookId = bookId;
+        // Store metadata object directly on the button element
+        btn.metadataObject = result;
         btn.addEventListener('click', function() {
-            const bookId = this.getAttribute('data-book-id');
-            const metadata = JSON.parse(this.getAttribute('data-metadata'));
-            applyMetadata(bookId, metadata);
+            applyMetadata(this.dataset.bookId, this.metadataObject);
         });
+        
+        cardFooter.appendChild(btn);
+        cardDiv.appendChild(cardFooter);
+        
+        card.appendChild(cardDiv);
+        container.appendChild(card);
     });
 }
 
