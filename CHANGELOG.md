@@ -1,5 +1,20 @@
 # BookScout Changelog
 
+## [2.9.1] - 2025-11-05
+
+### Fixed
+- **Soft Delete System**: Prevent merged/deleted books from re-appearing during rescans
+  - Books are now marked as `deleted = 1` instead of being permanently removed
+  - Deleted books are filtered out from all views
+  - Rescans skip books marked as deleted
+  - Preserves database history while keeping interface clean
+- **Preserve Manual Edits During Rescan**: Only update empty fields
+  - Changed UPDATE logic to use `COALESCE(existing, new)`
+  - Manual edits to ISBN, ASIN, series, descriptions are now protected
+  - `have_it` status still updates to reflect current library state
+
+---
+
 ## [2.9.0] - 2025-11-05
 
 ### Added
