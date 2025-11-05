@@ -1,6 +1,6 @@
 # BookScout Changelog
 
-## [2.9.0] - 2025-01-XX
+## [2.9.0] - 2025-11-05
 
 ### Added
 - **Manual Book Management**: Complete suite of manual book editing features
@@ -22,6 +22,10 @@
 - Smart metadata merging only updates non-empty fields
 - Search filters results by title similarity across all three APIs
 - Complete JavaScript handlers for edit and metadata search workflows
+
+### Fixed
+- JSON parsing error in metadata apply button (stored objects directly on DOM elements instead of as JSON strings in data attributes)
+- Proper HTML escaping to prevent XSS vulnerabilities
 
 ---
 
