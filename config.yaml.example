@@ -38,7 +38,7 @@ download:
 scan:
   schedule_cron: "0 * * * *"   # how often to auto-scan all watchlisted authors
   max_concurrent_scans: 5
-  language_filter: all          # "all" or ISO 639-1 code, e.g. "en"
+  language_filter: en           # "all" or ISO 639-1 code, e.g. "en", "de", "fr"
 
 server:
   host: "0.0.0.0"

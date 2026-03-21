@@ -50,7 +50,7 @@ async def scan_author_by_id(
     ``{"author_id", "author_name", "books_found", "new_books", "updated_books"}``
     """
     # ------------------------------------------------------------------ config
-    language_filter = "all"
+    language_filter = "en"
     google_api_key = ""
     isbndb_api_key = ""
     abs_url = ""
@@ -59,7 +59,7 @@ async def scan_author_by_id(
         scan_cfg = getattr(config, "scan", None)
         apis_cfg = getattr(config, "apis", None)
         abs_cfg = getattr(config, "audiobookshelf", None)
-        language_filter = getattr(scan_cfg, "language_filter", "all") or "all"
+        language_filter = getattr(scan_cfg, "language_filter", "en") or "en"
         google_api_key = getattr(apis_cfg, "google_books_key", "") or ""
         isbndb_api_key = getattr(apis_cfg, "isbndb_key", "") or ""
         abs_url = getattr(abs_cfg, "url", "") or ""
