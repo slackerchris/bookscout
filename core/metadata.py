@@ -16,6 +16,7 @@ from core.normalize import author_names_match
 OPENLIBRARY_API = "https://openlibrary.org/search.json"
 GOOGLE_BOOKS_API = "https://www.googleapis.com/books/v1/volumes"
 AUDNEXUS_API = "https://api.audnex.us"
+AUDIBLE_CATALOG_API = "https://api.audible.com/1.0/catalog/products"
 ISBNDB_API = "https://api2.isbndb.com"
 
 
@@ -158,52 +159,114 @@ async def query_audnexus(
     author_name: str,
     language_filter: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Fetch audiobooks from Audnexus.  Fetches per-book details concurrently."""
-    try:
-        r = await client.get(
-            f"{AUDNEXUS_API}/search",
-            params={"name": author_name},
-            timeout=10,
-        )
-        if r.status_code != 200:
-            return []
-        search_data = r.json()
-    except Exception as exc:
-        print(f"[Audnexus] error: {exc}")
+    """Fetch audiobooks via the Audible catalog API with Audnexus per-book enrichment.
+
+    The Audnexus ``/search`` endpoint is gone (HTTP 404).  We now use the
+    Audible catalog API to discover audiobooks (with series data included) and
+    call Audnexus ``/books/{asin}`` per result for cover, ISBN, and runtime.
+    """
+    # --- Step 1: collect products from Audible catalog (paginated, max 200) --
+    all_products: list[dict] = []
+    per_page = 50
+
+    for page in range(4):  # 4 × 50 = 200 max
+        try:
+            r = await client.get(
+                AUDIBLE_CATALOG_API,
+                params={
+                    "author": author_name,
+                    "num_results": per_page,
+                    "page": page,
+                    "products_sort_by": "Relevance",
+                    "response_groups": "product_desc,contributors,series",
+                },
+                timeout=15,
+            )
+            r.raise_for_status()
+            data = r.json()
+        except Exception as exc:
+            print(f"[Audible] error on page {page}: {exc}")
+            break
+
+        products = data.get("products", [])
+        if not products:
+            break
+
+        for product in products:
+            product_authors = [
+                a.get("name", "") for a in (product.get("authors") or [])
+            ]
+            if product_authors and not any(
+                author_names_match(author_name, a) for a in product_authors
+            ):
+                continue
+            all_products.append(product)
+
+        if (page + 1) * per_page >= data.get("total_results", 0):
+            break
+
+    if not all_products:
         return []
 
-    sem = asyncio.Semaphore(10)
+    # --- Step 2: enrich each book with Audnexus /books/{asin} ----------------
+    sem = asyncio.Semaphore(8)
 
-    async def _fetch_one(item: dict) -> dict[str, Any] | None:
-        asin = item.get("asin", "")
-        authors_list: list[str] = [author_name]
-        async with sem:
-            if asin:
-                try:
-                    dr = await client.get(
-                        f"{AUDNEXUS_API}/books/{asin}", timeout=10
-                    )
-                    if dr.status_code == 200:
-                        api_authors = dr.json().get("authors", [])
-                        if api_authors:
-                            authors_list = api_authors
-                except Exception:
-                    pass
+    async def _enrich(product: dict) -> dict[str, Any] | None:
+        asin = product.get("asin", "")
+        title = product.get("title", "")
+        if not asin or not title:
+            return None
+
+        product_authors = [
+            a.get("name", "") for a in (product.get("authors") or [])
+        ]
+        series_list: list[dict] = product.get("series") or []
+        # Prefer a series entry that carries a sequence number
+        primary = next(
+            (s for s in series_list if s.get("sequence")),
+            series_list[0] if series_list else None,
+        )
+
         book: dict[str, Any] = {
-            "title": item.get("title", ""),
-            "subtitle": item.get("subtitle", ""),
+            "title": title,
+            "subtitle": product.get("subtitle", ""),
             "asin": asin,
-            "release_date": item.get("releaseDate", ""),
-            "cover_url": item.get("image"),
+            "release_date": None,
+            "cover_url": None,
             "format": "audiobook",
             "language": "en",
             "source": "Audnexus",
-            "authors": authors_list,
+            "authors": product_authors or [author_name],
+            "series": primary.get("title") if primary else None,
+            "series_position": primary.get("sequence") if primary else None,
         }
-        return book if book["title"] else None
+
+        # Best-effort enrichment: cover, ISBN, release date, canonical series
+        async with sem:
+            try:
+                dr = await client.get(
+                    f"{AUDNEXUS_API}/books/{asin}", timeout=10
+                )
+                if dr.status_code == 200:
+                    detail = dr.json()
+                    book["cover_url"] = detail.get("image")
+                    book["release_date"] = detail.get("releaseDate")
+                    book["isbn"] = detail.get("isbn")
+                    book["description"] = (
+                        detail.get("summary") or detail.get("description", "")
+                    )
+                    # Audnexus seriesPrimary is the canonical source — override
+                    sp = detail.get("seriesPrimary")
+                    if sp:
+                        book["series"] = sp.get("name")
+                        book["series_position"] = sp.get("position")
+            except Exception:
+                pass
+
+        return book
 
     results = await asyncio.gather(
-        *[_fetch_one(item) for item in search_data.get("results", [])[:100]],
+        *[_enrich(p) for p in all_products],
         return_exceptions=True,
     )
     return [r for r in results if isinstance(r, dict)]
@@ -277,7 +340,7 @@ async def search_audible_metadata_direct(
             params["author"] = author_name
 
         r = await client.get(
-            "https://api.audible.com/1.0/catalog/products",
+            AUDIBLE_CATALOG_API,
             params=params,
             timeout=10,
         )
