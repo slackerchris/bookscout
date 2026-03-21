@@ -265,6 +265,16 @@
                     {% if book.format %}
                         <small class="badge bg-info ms-1">{{ book.format }}</small>
                     {% endif %}
+                    {% if book.confidence_band %}
+                        <small class="badge ms-1
+                            {%- if book.confidence_band == 'high' %} bg-success
+                            {%- elif book.confidence_band == 'medium' %} bg-warning text-dark
+                            {%- else %} bg-danger
+                            {%- endif %}"
+                            title="Confidence score: {{ book.score }}">
+                            {{ book.confidence_band }}
+                        </small>
+                    {% endif %}
                 </div>
                 
                 <div class="mb-2">

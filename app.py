@@ -8,6 +8,7 @@ import json
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
 from typing import List, Dict, Optional
+from confidence import score_books
 
 app = Flask(__name__)
 
@@ -160,6 +161,12 @@ def init_db():
         db.execute('ALTER TABLE books ADD COLUMN deleted INTEGER DEFAULT 0')
     if 'co_authors' not in columns:
         db.execute('ALTER TABLE books ADD COLUMN co_authors TEXT')
+    if 'score' not in columns:
+        db.execute('ALTER TABLE books ADD COLUMN score INTEGER DEFAULT 0')
+    if 'confidence_band' not in columns:
+        db.execute('ALTER TABLE books ADD COLUMN confidence_band TEXT DEFAULT \'low\'')
+    if 'score_reasons' not in columns:
+        db.execute('ALTER TABLE books ADD COLUMN score_reasons TEXT')
     
     db.commit()
     db.close()
@@ -1731,7 +1738,10 @@ def scan_author(author_id):
     
     # Merge results
     all_books = merge_books(sources_to_merge)
-    
+
+    # Score and rank by confidence
+    all_books = score_books(all_books, search_author=author_name)
+
     # Check against Audiobookshelf and get series info
     for book in all_books:
         has_it, abs_series, abs_series_pos = check_audiobookshelf(book['title'], author_name)
@@ -1797,15 +1807,18 @@ def scan_author(author_id):
             db.execute('''
                 INSERT INTO books (author_id, title, subtitle, isbn, isbn13, asin, 
                                   release_date, format, source, cover_url, description, 
-                                  series, series_position, have_it, co_authors)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  series, series_position, have_it, co_authors,
+                                  score, confidence_band, score_reasons)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 author_id, book['title'], book.get('subtitle'), book.get('isbn'),
                 book.get('isbn13'), book.get('asin'), book.get('release_date'),
                 book.get('format'), json.dumps(book['source']) if isinstance(book['source'], list) else book['source'],
                 book.get('cover_url'), book.get('description'),
                 book.get('series'), book.get('series_position'), book.get('have_it', 0),
-                co_authors_json
+                co_authors_json,
+                book.get('score', 0), book.get('confidence_band', 'low'),
+                json.dumps(book.get('score_reasons', [])) if book.get('score_reasons') else None
             ))
             new_books += 1
         else:
@@ -1829,7 +1842,10 @@ def scan_author(author_id):
                     asin = COALESCE(asin, ?),
                     isbn = COALESCE(isbn, ?),
                     isbn13 = COALESCE(isbn13, ?),
-                    co_authors = COALESCE(co_authors, ?)
+                    co_authors = COALESCE(co_authors, ?),
+                    score = ?,
+                    confidence_band = ?,
+                    score_reasons = ?
                 WHERE id = ?
             ''', (
                 book.get('have_it', 0), 
@@ -1842,6 +1858,9 @@ def scan_author(author_id):
                 book.get('isbn'),
                 book.get('isbn13'),
                 co_authors_json,
+                book.get('score', 0),
+                book.get('confidence_band', 'low'),
+                json.dumps(book.get('score_reasons', [])) if book.get('score_reasons') else None,
                 existing['id']
             ))
             updated_books += 1
