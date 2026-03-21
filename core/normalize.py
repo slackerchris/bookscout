@@ -1,0 +1,77 @@
+"""Author/book name normalisation and fuzzy matching helpers."""
+from __future__ import annotations
+
+import re
+
+
+def normalize_author_name(name: str) -> str:
+    """Lower-case, remove periods, collapse whitespace, strip common suffixes."""
+    n = name.lower().strip()
+    n = re.sub(r"\.", "", n)
+    n = re.sub(r"\s+", " ", n)
+    n = re.sub(r"\s+(jr|sr|ii|iii|iv)$", "", n)
+    return n.strip()
+
+
+def author_names_match(search_name: str, book_author: str) -> bool:
+    """Return True if the two author names refer to the same person.
+
+    Handles:
+    - Exact match after normalisation
+    - One name being a subset of the other
+    - Abbreviated first names / initials (e.g. "J N Chaney" ↔ "Jason Nicholas Chaney")
+    """
+    s = normalize_author_name(search_name)
+    b = normalize_author_name(book_author)
+
+    if s == b:
+        return True
+
+    sw, bw = set(s.split()), set(b.split())
+    if sw.issubset(bw) or bw.issubset(sw):
+        return True
+
+    sp, bp = s.split(), b.split()
+
+    # search uses initials → match against book's full first names
+    if sp and bp and all(len(p) == 1 for p in sp[:-1]):
+        if sp[-1] == bp[-1] and len(sp) - 1 <= len(bp) - 1:
+            if all(sp[i] == bp[i][0] for i in range(len(sp) - 1)):
+                return True
+
+    # book uses initials → match against search's full first names
+    if sp and bp and all(len(p) == 1 for p in bp[:-1]):
+        if bp[-1] == sp[-1] and len(bp) - 1 <= len(sp) - 1:
+            if all(bp[i] == sp[i][0] for i in range(len(bp) - 1)):
+                return True
+
+    return False
+
+
+def extract_series_from_title(title: str) -> tuple[str, str | None, str | None]:
+    """Parse a book title and return ``(clean_title, series_name, position)``.
+
+    Returns the original title unchanged when no series pattern is detected.
+    """
+    patterns = [
+        r"\(([^)]+?)\s*#(\d+(?:\.\d+)?)\)",
+        r"\(([^)]+?),?\s*Book\s+(\d+(?:\.\d+)?)\)",
+        r"\(([^)]+?),?\s*Vol\.?\s+(\d+(?:\.\d+)?)\)",
+        r"\(([^)]+?)\s*-\s*Book\s+(\d+(?:\.\d+)?)\)",
+        r"^(.+?):\s*Book\s+(\d+(?:\.\d+)?)\s*[-:]",
+        r"^(.+?)\s*#(\d+(?:\.\d+)?)\s*[-:]",
+        r"(.+?)\s+Book\s+(\d+(?:\.\d+)?)$",
+        r"(.+?)\s+#(\d+(?:\.\d+)?)$",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, title, re.IGNORECASE)
+        if m:
+            series = m.group(1).strip()
+            position = m.group(2)
+            clean = re.sub(pattern, "", title, flags=re.IGNORECASE).strip()
+            clean = re.sub(r"^[-:\s]+|[-:\s]+$", "", clean).strip()
+            if len(clean) < 3:
+                clean = title
+            return clean, series, position
+
+    return title, None, None

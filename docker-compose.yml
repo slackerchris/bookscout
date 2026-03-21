@@ -1,24 +1,67 @@
 version: '3.8'
 
 services:
+  # ── DB migrations (runs once, exits) ──────────────────────────────────────
+  migrate:
+    image: ghcr.io/slackerchris/bookscout:latest
+    container_name: bookscout-migrate
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://bookscout:${POSTGRES_PASSWORD:-bookscout}@postgres/bookscout
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - bookscout
+
+  # ── API service ───────────────────────────────────────────────────────────
   bookscout:
     image: ghcr.io/slackerchris/bookscout:latest
     container_name: bookscout
     ports:
-      - "5000:5000"
+      - "8000:8000"
     volumes:
       - bookscout-data:/data
     environment:
-      # Optional: Set these here or configure via the web UI
+      - DATABASE_URL=postgresql+asyncpg://bookscout:${POSTGRES_PASSWORD:-bookscout}@postgres/bookscout
+      - REDIS_URL=redis://redis:6379
+      - BOOKSCOUT_CONFIG=/data/config.yaml
+      # Optional env-var overrides (or put these in /data/config.yaml instead)
       - AUDIOBOOKSHELF_URL=${AUDIOBOOKSHELF_URL:-}
       - AUDIOBOOKSHELF_TOKEN=${AUDIOBOOKSHELF_TOKEN:-}
       - PROWLARR_URL=${PROWLARR_URL:-}
       - PROWLARR_API_KEY=${PROWLARR_API_KEY:-}
-      # PostgreSQL (used from v0.31.0 onwards)
-      - DATABASE_URL=postgresql+asyncpg://bookscout:${POSTGRES_PASSWORD:-bookscout}@postgres/bookscout
-      # Redis (used from v0.32.0 onwards)
-      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-bookscout-secret-key-change-in-production}
     depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - bookscout
+
+  # ── Background worker (arq) ───────────────────────────────────────────────
+  worker:
+    image: ghcr.io/slackerchris/bookscout:latest
+    container_name: bookscout-worker
+    command: ["arq", "workers.settings.WorkerSettings"]
+    volumes:
+      - bookscout-data:/data
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://bookscout:${POSTGRES_PASSWORD:-bookscout}@postgres/bookscout
+      - REDIS_URL=redis://redis:6379
+      - BOOKSCOUT_CONFIG=/data/config.yaml
+      - AUDIOBOOKSHELF_URL=${AUDIOBOOKSHELF_URL:-}
+      - AUDIOBOOKSHELF_TOKEN=${AUDIOBOOKSHELF_TOKEN:-}
+      - PROWLARR_URL=${PROWLARR_URL:-}
+      - PROWLARR_API_KEY=${PROWLARR_API_KEY:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

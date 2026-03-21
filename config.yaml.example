@@ -1,0 +1,46 @@
+# BookScout configuration file
+# Copy to /data/config.yaml or set BOOKSCOUT_CONFIG env var to the path.
+# All values can also be overridden via environment variables.
+
+database:
+  url: postgresql+asyncpg://bookscout:bookscout@localhost/bookscout  # also: DATABASE_URL
+
+redis:
+  url: redis://localhost:6379  # also: REDIS_URL
+
+audiobookshelf:
+  url: http://localhost:13378  # also: AUDIOBOOKSHELF_URL
+  token: ""                    # also: AUDIOBOOKSHELF_TOKEN
+
+prowlarr:
+  url: http://localhost:9696   # also: PROWLARR_URL
+  api_key: ""                  # also: PROWLARR_API_KEY
+
+jackett:
+  url: http://localhost:9117
+  api_key: ""
+
+apis:
+  google_books_key: ""   # optional – raises Google Books rate limit; also: GOOGLE_BOOKS_API_KEY
+  isbndb_key: ""         # optional – premium ISBNdb access;           also: ISBNDB_API_KEY
+
+download:
+  preferred: ""           # "sabnzbd" | "qbittorrent" | "transmission"
+  sabnzbd:
+    url: http://localhost:8080
+    api_key: ""
+  torrent:
+    type: qbittorrent     # "qbittorrent" | "transmission"
+    url: http://localhost:8081
+    username: ""
+    password: ""
+
+scan:
+  schedule_cron: "0 * * * *"   # how often to auto-scan all watchlisted authors
+  max_concurrent_scans: 5
+  language_filter: all          # "all" or ISO 639-1 code, e.g. "en"
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  secret_key: "bookscout-secret-key-change-in-production"  # also: SECRET_KEY

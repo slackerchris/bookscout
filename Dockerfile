@@ -2,27 +2,37 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies
+# Install system deps (psycopg2 needs libpq)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application files
-COPY app.py .
+# Copy application
 COPY confidence.py .
+COPY config.py .
+COPY main.py .
+COPY cli.py .
 COPY VERSION .
-COPY templates/ templates/
+COPY alembic.ini .
+COPY core/ core/
+COPY api/ api/
+COPY workers/ workers/
 COPY db/ db/
 COPY scripts/ scripts/
 
-# Create directories
-RUN mkdir -p /data /app/static
+# Writable data directory
+RUN mkdir -p /data
+VOLUME /data
 
-# Set environment variables
-ENV FLASK_APP=app.py
 ENV PYTHONUNBUFFERED=1
+ENV BOOKSCOUT_CONFIG=/data/config.yaml
 
-# Expose port
-EXPOSE 5000
+# API port
+EXPOSE 8000
 
-# Run the application
-CMD ["python", "app.py"]
+# Default: run the FastAPI service
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

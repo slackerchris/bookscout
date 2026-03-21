@@ -1,5 +1,65 @@
 # BookScout Changelog
 
+## [0.32.0] - 2026-03-21
+
+> **Full Flask → FastAPI cut-over.**  This release collapses the planned
+> v0.32–v0.39 roadmap into a single build.  All business logic is now
+> async-native, SQLite is gone, and `/docs` replaces the Flask UI.
+
+### Added
+- **FastAPI service** (`main.py`): replaces Flask (`app.py` deleted)
+  - `uvicorn main:app` entry-point; auto-generated `/docs` (Swagger UI) and `/redoc`
+  - CORS middleware, async lifespan managing Redis + arq connections
+- **REST API** (`api/v1/`):
+  - `GET/POST/PATCH/DELETE /api/v1/authors` — watchlist CRUD with stats
+  - `GET/PATCH/DELETE /api/v1/books` — book querying and edits
+  - `POST /api/v1/scans/author/{id}` — enqueue single-author scan
+  - `POST /api/v1/scans/all` — enqueue full-watchlist scan
+  - `GET /api/v1/scans/job/{id}` — arq job status polling
+  - `GET /api/v1/events` — SSE stream (real-time scan events from Redis pub/sub)
+  - `GET/POST/DELETE /api/v1/webhooks` — webhook registration + delivery log
+  - `POST /api/v1/webhooks/{id}/test` — test delivery
+  - `POST /api/v1/search` — unified Prowlarr + Jackett search
+  - `POST /api/v1/search/download` — route to configured download client
+  - `POST /api/v1/audiobookshelf/import-authors` — bulk-import ABS library authors
+  - `GET /health` — liveness + DB readiness check
+- **async core modules** (`core/`):
+  - `core/normalize.py` — author name normalisation and fuzzy matching
+  - `core/metadata.py` — async `httpx` versions of all 4 API query functions (OpenLibrary, Google Books, Audnexus, ISBNdb) + Audible series lookup; OpenLibrary/Google Books/Audnexus queried **in parallel** per scan
+  - `core/merge.py` — book deduplication and source accumulation
+  - `core/audiobookshelf.py` — async ABS ownership check + bulk author fetch
+  - `core/search.py` — async Prowlarr / Jackett search + SABnzbd / qBittorrent / Transmission download routing
+  - `core/scan.py` — `scan_author_by_id()` async scan orchestrator writing to PostgreSQL
+- **arq workers** (`workers/`):
+  - `workers/tasks.py` — `scan_author_task` and `scan_all_authors_task` arq functions
+  - `workers/settings.py` — `WorkerSettings` class; start with `arq workers.settings.WorkerSettings`
+  - Worker context initialised with a Redis async client for event publishing
+- **Config system** (`config.py`, `config.yaml.example`):
+  - Reads `config.yaml` (path via `BOOKSCOUT_CONFIG` env var, default `/data/config.yaml`)
+  - Deep-merges with hard-coded defaults then layers env var overrides
+  - Covers: database, redis, audiobookshelf, prowlarr, jackett, APIs, download clients, scan schedule
+- **CLI** (`cli.py`): typer-based command-line interface
+  - `python cli.py scan --author-id <id>` — in-process single-author scan
+  - `python cli.py scan --all` — in-process full-watchlist scan
+  - `python cli.py migrate --sqlite <path>` — delegates to `scripts/migrate_sqlite.py`
+- **Docker Compose** updated:
+  - `migrate` service: runs `alembic upgrade head` once before anything starts
+  - `bookscout` service: `uvicorn main:app`, port `8000`
+  - `worker` service: `arq workers.settings.WorkerSettings` (separate process)
+- **Dockerfile** updated: uvicorn entrypoint, copies `core/`, `api/`, `workers/`, `cli.py`
+
+### Removed
+- `app.py` — Flask monolith
+- `templates/` — all Jinja2 HTML templates
+- `start.sh` — Flask dev-server script
+- Flask, Werkzeug, requests from `requirements.txt`
+
+### Changed
+- `requirements.txt`: Flask/Werkzeug/requests → fastapi, uvicorn, httpx, typer, rich
+- `VERSION` → `0.32.0`
+
+---
+
 ## [0.31.0] - 2026-03-21
 
 ### Added
