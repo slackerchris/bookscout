@@ -1,5 +1,21 @@
 # BookScout Changelog
 
+## [0.30.0] - 2026-03-21
+
+### Added
+- **Confidence Scoring Engine** (`confidence.py`): Scores merged book results to surface the most reliable matches
+  - Multi-signal scoring: exact/normalized title match, author match (exact + fuzzy), ISBN match, publication year, provider count, audiobook format
+  - ISBN match awards +100 points; multi-provider presence adds up to +35 points
+  - Penalty system: bad-keyword detection (-60) for summaries/workbooks/companions, suspicious edition mismatch (-25) for abridged/illustrated/movie tie-in editions
+  - Results bucketed into `high` (≥100), `medium` (50–99), and `low` (<50) confidence bands
+  - Each scored book carries `score`, `confidence_band`, and `score_reasons` fields for transparency and debugging
+- **Confidence Integration Guide** (`CONFIDENCE_INTEGRATION.py`): Step-by-step patch instructions for wiring `score_books()` into `app.py`
+  - Covers import, `scan_author()` call site, DB migration (`score`, `confidence_band`, `score_reasons` columns), and template exposure
+  - Purely additive — no existing logic removed
+- **Confidence Test Suite** (`test_confidence.py`): Unit tests covering scoring rules and edge cases
+
+---
+
 ## [0.29.4] - 2025-11-05
 
 ### Changed
