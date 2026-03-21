@@ -43,21 +43,6 @@ _LANG_NAME_TO_ISO: dict[str, str] = {
     "romanian": "ro",
     "turkish": "tr",
 }
-    "dutch": "nl",
-    "japanese": "ja",
-    "chinese": "zh",
-    "korean": "ko",
-    "russian": "ru",
-    "swedish": "sv",
-    "norwegian": "no",
-    "danish": "da",
-    "finnish": "fi",
-    "polish": "pl",
-    "czech": "cs",
-    "hungarian": "hu",
-    "romanian": "ro",
-    "turkish": "tr",
-}
 
 
 async def query_openlibrary(

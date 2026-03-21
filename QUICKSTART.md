@@ -1,85 +1,124 @@
-# BookScout - Quick Start Guide
+# BookScout — Quick Start
 
-## Installation (Choose One Method)
+BookScout is a **headless REST API service** — there is no web UI.  All
+interaction is through HTTP endpoints.  Browse every endpoint interactively
+at **http://localhost:8000/docs** once the service is running.
 
-### Method 1: Docker Compose (Easiest - Recommended)
+---
+
+## Requirements
+
+- Docker + Docker Compose *(recommended)*, **or** Python 3.11+ with a running
+  PostgreSQL instance and Redis
+
+---
+
+## Method 1: Docker Compose (Recommended)
 
 ```bash
-# Navigate to the bookscout directory
-cd bookscout
+# 1. Create your config file
+cp config.yaml.example config.yaml   # edit as needed (see below)
 
-# Run the setup script
-./start.sh
-
-# Or manually:
+# 2. Start everything
 docker-compose up -d
 ```
 
-Access at: **http://localhost:5000**
+Three containers start:
+- **bookscout** — FastAPI service on port **8000**
+- **postgres** — PostgreSQL database
+- **redis** — Redis instance (job queue + event bus)
 
-### Method 2: Manual Python Setup
+API: **http://localhost:8000**  
+Interactive docs: **http://localhost:8000/docs**
 
-```bash
-cd bookscout
-pip install -r requirements.txt
-python app.py
+### Minimal config.yaml
+
+```yaml
+audiobookshelf:
+  url: "http://your-abs-server:13378"
+  token: "your-abs-api-token"
 ```
 
-Access at: **http://localhost:5000**
+That is all you need. PostgreSQL, Redis, port, and source settings all have
+working defaults.
 
 ---
 
-## First Time Setup (5 minutes)
+## Method 2: Bare-metal (Python)
 
-### Step 1: Configure Settings
+```bash
+pip install -r requirements.txt
+# PostgreSQL and Redis must already be running — see DEPLOYMENT.md
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
 
-1. Open http://localhost:5000/settings
-2. Enter your details:
-
-**Audiobookshelf:**
-- URL: `http://your-server:13378` (replace with your ABS URL)
-- API Token: Get from ABS → Settings → Users → Your User → API Token
-
-**Prowlarr:**
-- URL: `http://your-server:9696` (replace with your Prowlarr URL)
-- API Key: Get from Prowlarr → Settings → General → API Key
-
-3. Click "Save Settings"
-
-### Step 2: Add Your First Author
-
-1. Go to home page (http://localhost:5000)
-2. Type an author name (e.g., "Andrew Rowe")
-3. Click "Add & Scan"
-4. Wait 10-30 seconds for results
-
-### Step 3: View Results
-
-You'll see:
-- ✅ Books you already have (green badge)
-- 📚 Books you don't have (with "Search via Prowlarr" button)
-- Multiple sources aggregated (OpenLibrary, GoogleBooks, Audnexus)
+Set `DATABASE_URL` and `REDIS_URL` environment variables, or configure them
+in `config.yaml`.
 
 ---
 
-## Daily Use
+## First Steps (5 minutes)
 
-### Finding Missing Books
+### 1. Confirm the service is healthy
 
-1. Click on any author from your watchlist
-2. Click "Search via Prowlarr" on missing books
-3. Prowlarr opens with search results
-4. Download from your preferred indexer
+```bash
+curl http://localhost:8000/health
+# {"status":"ok","version":"0.41.0",
+#  "components":{"database":"ok","redis":"ok"}}
+```
 
-### Adding More Authors
+If `status` is `"degraded"` check `docker-compose logs` for the failing component.
 
-1. Home page → Enter author name → Add & Scan
-2. Repeat for all authors you want to track
+### 2. Add an author to your watchlist
 
-### Checking for New Releases
+```bash
+curl -X POST http://localhost:8000/api/v1/authors/ \
+     -H "Content-Type: application/json" \
+     -d '{"name": "J.N. Chaney"}'
+# {"id": 1, "name": "J.N. Chaney", "active": true, ...}
+```
 
-- **Single author**: Click "Scan" button on author card
-- **All authors**: Click "Scan All" in navigation bar
+### 3. Trigger a scan
+
+```bash
+curl -X POST http://localhost:8000/api/v1/scans/1
+# {"job_id": "abc123", "status": "queued"}
+```
+
+The scan runs in the background via the arq worker.  Wait a few seconds, then:
+
+```bash
+curl "http://localhost:8000/api/v1/books/?author_id=1"
+```
+
+Each book has:
+- `have_it` — `true` when found in your Audiobookshelf library
+- `confidence_band` — `high` / `medium` / `low`
+- `score` — numeric relevance score
+- `series_name` / `series_position` — series info when available
+
+### 4. Scan all watched authors at once
+
+```bash
+curl -X POST http://localhost:8000/api/v1/scans/all
+```
+
+---
+
+## Key API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Service health (DB + Redis) |
+| `GET` | `/docs` | Interactive Swagger UI |
+| `GET` | `/api/v1/authors/` | List watched authors |
+| `POST` | `/api/v1/authors/` | Add author to watchlist |
+| `DELETE` | `/api/v1/authors/{id}` | Remove author (soft-delete) |
+| `GET` | `/api/v1/authors/{id}/coauthors` | Co-authors + watchlist status |
+| `POST` | `/api/v1/scans/{id}` | Scan one author |
+| `POST` | `/api/v1/scans/all` | Scan all active authors |
+| `GET` | `/api/v1/books/` | List books (`?author_id=`, `?have_it=false`) |
+| `GET` | `/api/v1/events` | SSE stream of real-time scan events |
 
 ---
 
@@ -88,14 +127,15 @@ You'll see:
 ```bash
 # View logs
 docker-compose logs -f bookscout
+docker-compose logs -f worker
 
-# Stop BookScout
+# Stop everything
 docker-compose down
 
-# Restart
-docker-compose restart
+# Restart after config.yaml change
+docker-compose restart bookscout
 
-# Update (after pulling new code)
+# Rebuild after a code update
 docker-compose down
 docker-compose build
 docker-compose up -d
@@ -103,53 +143,22 @@ docker-compose up -d
 
 ---
 
-## File Structure
-
-```
-bookscout/
-├── app.py                  # Main Flask application
-├── templates/              # HTML templates
-├── requirements.txt        # Python dependencies
-├── Dockerfile             # Docker image definition
-├── docker-compose.yml     # Docker Compose configuration
-├── bookscout.db          # SQLite database (auto-created)
-├── start.sh              # Quick start script
-└── README.md             # Full documentation
-```
-
----
-
 ## Troubleshooting
 
-**"Books not marked as Have"**
-→ Check Settings: Verify Audiobookshelf URL and token are correct
+**`"status": "degraded"` in /health**  
+→ Check `docker-compose logs postgres` and `docker-compose logs redis`.
 
-**"Prowlarr search fails"**
-→ Check Settings: Verify Prowlarr URL and API key are correct
+**Scan queued but books never appear**  
+→ The arq worker may be down.  Check `docker-compose logs worker`.
 
-**"Author shows too few books"**
-→ Try re-scanning (click "Scan" again)
-→ Some sources update slowly
+**`have_it` is always false**  
+→ Verify `audiobookshelf.url` and `audiobookshelf.token` in `config.yaml`.
 
-**"Port 5000 already in use"**
-→ Edit docker-compose.yml, change `"5000:5000"` to `"5001:5000"` (or any free port)
-
----
-
-## What's Next?
-
-- Add all your favorite authors
-- Set up a cron job or scheduled task to hit `/scan-all` weekly
-- Integrate with your existing homelab (Nginx Proxy Manager for SSL, etc.)
-- Check for new books regularly
+**Too few books returned**  
+→ Add a Google Books API key under `apis.google_books_key` in `config.yaml`
+for better coverage.  Enable/disable individual sources under `scan.sources`.
 
 ---
 
-## Support
-
-This is a custom-built tool. No official support, but:
-- Check README.md for detailed documentation
-- Common issues usually involve API credentials
-- Test manually accessing your ABS/Prowlarr APIs first
-
-Enjoy! 📚
+For full setup details, reverse-proxy configuration, webhooks, and n8n
+integration see [DEPLOYMENT.md](DEPLOYMENT.md).

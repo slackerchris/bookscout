@@ -1,11 +1,18 @@
 # BookScout: Intelligent Audiobook Metadata Management System
 ## Technical Paper
 
+> **⚠ Archival document.** This paper describes v0.29.4 (November 2025) and
+> has not been updated to reflect the v0.40+ rewrite.  The current system is a
+> headless FastAPI service backed by PostgreSQL, Redis, and an arq worker —
+> not the Flask/SQLite architecture described here.  See
+> [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
+
 **Version:** 0.29.4  
 **Last Updated:** November 22, 2025  
-**Status:** Beta (Personal Use)  
+**Status:** Archival — superseded by v0.40.0
 
 ---
+
 
 ## Abstract
 
