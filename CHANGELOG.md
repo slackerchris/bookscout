@@ -9,10 +9,16 @@
   - Penalty system: bad-keyword detection (-60) for summaries/workbooks/companions, suspicious edition mismatch (-25) for abridged/illustrated/movie tie-in editions
   - Results bucketed into `high` (≥100), `medium` (50–99), and `low` (<50) confidence bands
   - Each scored book carries `score`, `confidence_band`, and `score_reasons` fields for transparency and debugging
-- **Confidence Integration Guide** (`CONFIDENCE_INTEGRATION.py`): Step-by-step patch instructions for wiring `score_books()` into `app.py`
-  - Covers import, `scan_author()` call site, DB migration (`score`, `confidence_band`, `score_reasons` columns), and template exposure
-  - Purely additive — no existing logic removed
+- **Confidence Integration** (`app.py`): `score_books()` wired into `scan_author()` pipeline
+  - Called after `merge_books()`, results sorted by score descending before ABS check loop
+  - DB migration: `score`, `confidence_band`, `score_reasons` columns added to `books` table (auto-migrates on startup)
+  - Both INSERT and UPDATE paths persist score data
+- **Confidence Badges** (`author.html`): Visual confidence indicator on every book card
+  - Green = high (≥100), yellow = medium (50–99), red = low (<50)
+  - Raw score shown in tooltip on hover
+- **Confidence Integration Guide** (`CONFIDENCE_INTEGRATION.py`): Reference patch instructions
 - **Confidence Test Suite** (`test_confidence.py`): Unit tests covering scoring rules and edge cases
+- **Updated Roadmap** (`REFACTOR_PLAN.md`): Full v0.30→v0.40 staged plan — FastAPI + arq + Redis + PostgreSQL service architecture
 
 ---
 
