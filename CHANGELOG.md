@@ -2,12 +2,20 @@
 
 ## [0.41.0] - 2026-07-13
 
-> **Cross-watchlist deduplication + co-author discovery.**  Books shared by
-> multiple watched authors are now stored as a single canonical row.  Co-authors
-> that appear during scanning are surfaced via a new API endpoint and a Redis
-> event, with an optional flag to auto-add them to the watchlist.
+> **Cross-watchlist deduplication + co-author discovery + scheduled scanning.**
+> Books shared by multiple watched authors are now stored as a single canonical
+> row.  Co-authors are surfaced via a new API endpoint and a Redis event.
+> `schedule_cron` in config now actually fires — the arq worker runs a full
+> watchlist scan on the configured schedule.
 
 ### Added
+- **Scheduled scanning** — `WorkerSettings.cron_jobs` is now built from
+  `scan.schedule_cron` in `config.yaml` (default `"0 * * * *"` = top of every
+  hour).  The arq worker parses the 5-field crontab string at startup and
+  registers `scan_all_authors_task` as a recurring cron job — no external
+  scheduler or `POST /scans/all` is needed.  Supports all standard crontab
+  syntax: `*`, `*/n`, `n`, `n-m`, `n,m`.  Parse errors disable the schedule
+  and log a warning rather than crashing the worker.
 - **`_find_existing_book` Phase-1 global lookup** — ISBN-13, ISBN, and ASIN
   identity checks now search *all* books regardless of which author originally
   added them.  When a cross-author match is found the scanning author is
