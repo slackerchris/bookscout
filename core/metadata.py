@@ -29,6 +29,21 @@ _LANG_NAME_TO_ISO: dict[str, str] = {
     "portuguese": "pt",
     "italian": "it",
     "dutch": "nl",
+    "polish": "pl",
+    "russian": "ru",
+    "japanese": "ja",
+    "chinese": "zh",
+    "korean": "ko",
+    "swedish": "sv",
+    "danish": "da",
+    "norwegian": "no",
+    "finnish": "fi",
+    "czech": "cs",
+    "hungarian": "hu",
+    "romanian": "ro",
+    "turkish": "tr",
+}
+    "dutch": "nl",
     "japanese": "ja",
     "chinese": "zh",
     "korean": "ko",
@@ -190,11 +205,12 @@ async def query_audnexus(
     Audible catalog API to discover audiobooks (with series data included) and
     call Audnexus ``/books/{asin}`` per result for cover, ISBN, and runtime.
     """
-    # --- Step 1: collect products from Audible catalog (paginated, max 200) --
+    # --- Step 1: collect products from Audible catalog (paginated) -----------
     all_products: list[dict] = []
     per_page = 50
+    max_pages = 20  # hard ceiling of 1000 results — more than any author needs
 
-    for page in range(4):  # 4 × 50 = 200 max
+    for page in range(max_pages):
         try:
             r = await client.get(
                 AUDIBLE_CATALOG_API,
