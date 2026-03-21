@@ -60,17 +60,17 @@
 
 | Version | Focus | Status |
 |---|---|---|
-| 0.30.0 | Confidence engine wired into Flask app | In Progress |
-| 0.31.0 | PostgreSQL schema + SQLAlchemy async models + Alembic | Planned |
-| 0.32.0 | arq worker + Redis; scan jobs migrated off HTTP thread | Planned |
-| 0.33.0 | FastAPI service replacing Flask; async throughout | Planned |
-| 0.34.0 | Event bus (Redis pub/sub) + SSE `/api/v1/events` stream | Planned |
-| 0.35.0 | Webhook registration + delivery engine | Planned |
-| 0.36.0 | `config.yaml` for infra settings | Planned |
-| 0.37.0 | Filesystem scanner (`scanner.py`) + hybrid ABS mode | Planned |
-| 0.38.0 | Drop web UI (headless) | Planned |
-| 0.39.0 | CLI tooling (`typer`) | Planned |
-| 0.40.0 | Stable service release | Planned |
+| 0.30.0 | Confidence engine wired into Flask app | ✅ Done |
+| 0.31.0 | PostgreSQL schema + SQLAlchemy async models + Alembic | ✅ Done |
+| 0.32.0 | arq worker + Redis + FastAPI + SSE + Webhooks + config.yaml + CLI (collapsed v0.32–v0.39) | ✅ Done |
+| 0.33.0 | *(collapsed into v0.32.0)* | — |
+| 0.34.0 | *(collapsed into v0.32.0)* | — |
+| 0.35.0 | *(collapsed into v0.32.0)* | — |
+| 0.36.0 | *(collapsed into v0.32.0)* | — |
+| 0.37.0 | Filesystem scanner (`core/scanner.py`) + `/api/v1/library-paths` + hybrid ABS mode | ✅ Done |
+| 0.38.0 | *(collapsed into v0.32.0)* | — |
+| 0.39.0 | *(collapsed into v0.32.0)* | — |
+| 0.40.0 | Stable service release | ⏳ Next |
 
 ---
 

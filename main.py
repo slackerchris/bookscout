@@ -55,7 +55,7 @@ app = FastAPI(
         "checks your Audiobookshelf library for ownership; "
         "delivers notifications via SSE and webhooks."
     ),
-    version="0.32.0",
+    version="0.37.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -78,6 +78,7 @@ from api.v1.webhooks import router as webhooks_router
 from api.v1.health import router as health_router
 from api.v1.search import router as search_router
 from api.v1.abs import router as abs_router
+from api.v1.library_paths import router as library_paths_router
 
 PREFIX = "/api/v1"
 
@@ -89,3 +90,4 @@ app.include_router(events_router, prefix=PREFIX)
 app.include_router(webhooks_router, prefix=PREFIX)
 app.include_router(search_router, prefix=PREFIX)
 app.include_router(abs_router, prefix=PREFIX)
+app.include_router(library_paths_router, prefix=PREFIX)

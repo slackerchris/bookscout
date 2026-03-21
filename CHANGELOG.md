@@ -1,6 +1,60 @@
 # BookScout Changelog
 
-## [0.32.0] - 2026-03-21
+## [0.37.0] - 2026-03-21
+
+> **Filesystem scanner + library path management.**  BookScout can now detect
+> owned audiobooks directly from local library directories, without requiring
+> Audiobookshelf.  ABS and filesystem ownership checks work together — whichever
+> fires first marks the book as owned.
+
+### Added
+- **`core/scanner.py`** — async filesystem scanner
+  - Walks configured library path directories for audio files (`.m4b`, `.mp3`,
+    `.flac`, `.opus`, `.aac`, `.ogg`, `.wma`, `.m4a`)
+  - Parses author + title from directory structure (supports ABS standard layout,
+    single-file books, nested series folders, and `Author - Title` filename pattern)
+  - Matches found files against DB books using `author_names_match` + word-overlap
+    title similarity (≥ 0.75 threshold)
+  - Matched books updated: `have_it=True`, `match_method='filesystem'`,
+    `file_path=<directory>`
+  - Deduplicates multi-part books (multiple files in same folder = one match)
+  - Updates `LibraryPath.last_scanned` timestamp on completion
+- **`api/v1/library_paths.py`** — library path REST API
+  - `GET /api/v1/library-paths` — list all configured paths with scan status
+  - `POST /api/v1/library-paths` — register a new path (validates existence)
+  - `DELETE /api/v1/library-paths/{id}` — remove a path
+  - `POST /api/v1/library-paths/{id}/scan` — enqueue filesystem scan for one path
+  - `POST /api/v1/library-paths/scan-all` — enqueue scan for all enabled paths
+- **`workers/tasks.py`** — two new arq tasks
+  - `scan_library_path_task(library_path_id)` — scan a single path
+  - `scan_all_library_paths_task()` — scan all enabled paths sequentially
+- **`workers/settings.py`** — both new tasks registered in `WorkerSettings.functions`
+
+### Changed
+- `main.py`: mounted `/api/v1/library-paths` router; bumped `version` to `0.37.0`
+- `VERSION` → `0.37.0`
+- `REFACTOR_PLAN.md`: roadmap table updated — all completed versions marked ✅,
+  v0.40.0 marked as next target
+
+---
+
+## [0.32.1] - 2026-03-21
+
+### Fixed
+- **Audnexus API broken** (`core/metadata.py`): The `/search?name=` endpoint returns
+  HTTP 404.  `query_audnexus()` rewritten to use the Audible catalog API
+  (`api.audible.com/1.0/catalog/products`) for audiobook discovery (paginated,
+  up to 200 books per author) with Audnexus `/books/{asin}` for per-book enrichment
+  (cover, ISBN, release date, series). Result: 0 → 199 audiobooks for Brandon Sanderson.
+- **Language normalisation** (`core/metadata.py`): Audnexus returns full language
+  names (`"english"`, `"german"`); these are now mapped to ISO 639-1 codes (`"en"`,
+  `"de"`) to match the `language_filter` convention. The `language_filter` parameter
+  was previously accepted but silently ignored — it now correctly filters results.
+- **Default `language_filter`** (`config.yaml.example`, `core/scan.py`): Changed
+  from `"all"` to `"en"` so new deployments default to English-only results.
+
+---
+
 
 > **Full Flask → FastAPI cut-over.**  This release collapses the planned
 > v0.32–v0.39 roadmap into a single build.  All business logic is now

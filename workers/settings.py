@@ -5,7 +5,12 @@ import os
 
 from arq.connections import RedisSettings
 
-from workers.tasks import scan_all_authors_task, scan_author_task
+from workers.tasks import (
+    scan_all_authors_task,
+    scan_all_library_paths_task,
+    scan_author_task,
+    scan_library_path_task,
+)
 
 
 def _redis_settings() -> RedisSettings:
@@ -31,7 +36,7 @@ async def on_shutdown(ctx: dict) -> None:
 
 
 class WorkerSettings:
-    functions = [scan_author_task, scan_all_authors_task]
+    functions = [scan_author_task, scan_all_authors_task, scan_library_path_task, scan_all_library_paths_task]
     redis_settings = _redis_settings()
     on_startup = staticmethod(on_startup)
     on_shutdown = staticmethod(on_shutdown)
