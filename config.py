@@ -42,6 +42,12 @@ _DEFAULT: dict = {
         "schedule_cron": "0 * * * *",
         "max_concurrent_scans": 5,
         "language_filter": "all",
+        "sources": {
+            "openlibrary": True,
+            "google_books": True,
+            "audible": True,
+            "isbndb": True,   # only active when apis.isbndb_key is set
+        },
     },
     "server": {
         "host": "0.0.0.0",

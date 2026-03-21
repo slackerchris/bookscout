@@ -60,7 +60,7 @@ async def query_openlibrary(
         r.raise_for_status()
         data = r.json()
     except Exception as exc:
-        print(f"[OpenLibrary] error: {exc}")
+        print(f"[OpenLibrary] error: {type(exc).__name__}: {exc}")
         return []
 
     books: list[dict[str, Any]] = []

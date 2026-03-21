@@ -55,15 +55,25 @@ async def scan_author_by_id(
     isbndb_api_key = ""
     abs_url = ""
     abs_token = ""
+    src_ol = True
+    src_gb = True
+    src_audible = True
+    src_isbndb = True
     if config:
         scan_cfg = getattr(config, "scan", None)
         apis_cfg = getattr(config, "apis", None)
         abs_cfg = getattr(config, "audiobookshelf", None)
+        sources_cfg = getattr(scan_cfg, "sources", None)
         language_filter = getattr(scan_cfg, "language_filter", "en") or "en"
         google_api_key = getattr(apis_cfg, "google_books_key", "") or ""
         isbndb_api_key = getattr(apis_cfg, "isbndb_key", "") or ""
         abs_url = getattr(abs_cfg, "url", "") or ""
         abs_token = getattr(abs_cfg, "token", "") or ""
+        if sources_cfg is not None:
+            src_ol = bool(getattr(sources_cfg, "openlibrary", True))
+            src_gb = bool(getattr(sources_cfg, "google_books", True))
+            src_audible = bool(getattr(sources_cfg, "audible", True))
+            src_isbndb = bool(getattr(sources_cfg, "isbndb", True))
 
     # ------------------------------------------------------------------ load author
     result = await session.execute(select(Author).where(Author.id == author_id))
@@ -76,12 +86,14 @@ async def scan_author_by_id(
 
     # ------------------------------------------------------------------ API queries
     async with httpx.AsyncClient() as client:
-        source_tasks = [
-            query_openlibrary(client, author_name, language_filter),
-            query_google_books(client, author_name, language_filter, google_api_key or None),
-            query_audnexus(client, author_name, language_filter),
-        ]
-        if isbndb_api_key:
+        source_tasks = []
+        if src_ol:
+            source_tasks.append(query_openlibrary(client, author_name, language_filter))
+        if src_gb:
+            source_tasks.append(query_google_books(client, author_name, language_filter, google_api_key or None))
+        if src_audible:
+            source_tasks.append(query_audnexus(client, author_name, language_filter))
+        if src_isbndb and isbndb_api_key:
             source_tasks.append(
                 query_isbndb(client, author_name, isbndb_api_key, language_filter)
             )
