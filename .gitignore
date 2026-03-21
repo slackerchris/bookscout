@@ -1,1 +1,6 @@
 venv/
+
+# Local secrets — never commit
+.env
+config.yaml
+*.key
