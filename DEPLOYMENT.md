@@ -1,260 +1,305 @@
-# 🎉 BookScout - Complete and Ready to Deploy!
+# BookScout — Deployment Guide
 
-## What You Have
+BookScout is a **headless FastAPI service** with no web UI. Interaction is via the REST API; interactive documentation is available at `/docs`.
 
-A fully functional web application that solves your book discovery problem by aggregating data from multiple sources.
+---
+
+## Prerequisites
+
+- Docker 24+ and Docker Compose v2+
+- A persistent data directory for `config.yaml` and PostgreSQL/Redis volumes
+- Network access to your Audiobookshelf and Prowlarr instances from the BookScout container
+
+---
+
+## 1. Create config.yaml
+
+Create a file at a path you control (e.g. `/opt/bookscout/config.yaml`):
+
+```yaml
+audiobookshelf:
+  url: http://abs:13378        # URL reachable from inside the container
+  token: your_abs_api_token    # ABS: Settings → Users → [user] → API Token
+
+prowlarr:
+  url: http://prowlarr:9696
+  api_key: your_prowlarr_api_key
+
+scan:
+  schedule_cron: "0 * * * *"  # rescan watchlist authors hourly
+  language_filter: en          # ISO 639-1; set to "all" to disable
+
+# Optional API keys
+apis:
+  google_books_key: ""         # raises daily quota from 100 to 1000 req/day
+  isbndb_key: ""
+
+server:
+  secret_key: change-me-in-production
+```
+
+---
+
+## 2. Docker Compose Deployment
+
+Copy the `docker-compose.yml` from the repository and set one environment variable:
+
+```bash
+# .env  (next to docker-compose.yml)
+POSTGRES_PASSWORD=a-strong-password
+```
+
+Mount your `config.yaml` into the container:
+
+```yaml
+# Relevant section of docker-compose.yml — add in the bookscout and worker services:
+volumes:
+  - /opt/bookscout/config.yaml:/data/config.yaml:ro
+  - bookscout-data:/data
+```
+
+Start all services:
+
+```bash
+docker compose up -d
+docker compose logs -f bookscout
+```
+
+Expected startup output:
+
+```
+bookscout-migrate exited with code 0
+bookscout  | [bookscout] started — API docs at /docs
+```
+
+**Service map:**
+
+| Container | Image | Role |
+|---|---|---|
+| `bookscout-postgres` | `postgres:16-alpine` | Primary datastore |
+| `bookscout-redis` | `redis:7-alpine` | Job queue + event bus |
+| `bookscout-migrate` | `ghcr.io/slackerchris/bookscout` | One-shot Alembic migration |
+| `bookscout` | `ghcr.io/slackerchris/bookscout` | FastAPI on port 8000 |
+| `bookscout-worker` | `ghcr.io/slackerchris/bookscout` | arq background scanner |
+
+---
+
+## 3. Verify the Deployment
+
+```bash
+# Health probe
+curl http://localhost:8000/health
+# {"status":"ok","version":"0.40.0"}
+
+# Open interactive docs
+open http://localhost:8000/docs
+```
+
+---
+
+## 4. Initial Setup via API
+
+### Add your first author
+
+```bash
+curl -s -X POST http://localhost:8000/api/v1/authors \
+  -H "Content-Type: application/json" \
+  -d '{"name": "J.N. Chaney"}' | jq
+```
+
+### Trigger a scan
+
+```bash
+# Replace 1 with the id returned above
+curl -s -X POST http://localhost:8000/api/v1/scans/author/1 | jq
+```
+
+### Check scan results
+
+```bash
+curl -s "http://localhost:8000/api/v1/books?author_id=1&confidence=HIGH" | jq
+```
+
+### Register a filesystem library path
+
+```bash
+curl -s -X POST http://localhost:8000/api/v1/library-paths \
+  -H "Content-Type: application/json" \
+  -d '{"path": "/mnt/audiobooks", "name": "NAS audiobooks"}' | jq
+
+# Trigger a filesystem scan
+curl -s -X POST http://localhost:8000/api/v1/library-paths/1/scan | jq
+```
+
+---
+
+## 5. Webhook Setup
+
+Register a consumer to receive `book.missing` and `scan.complete` events:
+
+```bash
+curl -s -X POST http://localhost:8000/api/v1/webhooks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "http://n8n:5678/webhook/bookscout",
+    "description": "n8n automation",
+    "events": ["book.missing", "scan.complete"]
+  }' | jq
+```
+
+Webhook payloads are delivered as `POST` with a JSON body. Failed deliveries are logged in the `webhook_deliveries` table.
+
+### SSE stream
+
+Connect any client to the live event stream:
+
+```bash
+curl -N http://localhost:8000/api/v1/events
+```
+
+---
+
+## 6. Audiobookshelf Integration
+
+BookScout calls the ABS API to check which books are already in your library. The `token` in `config.yaml` must be an ABS user token with library read access.
+
+To verify the connection:
+
+```bash
+curl -s http://localhost:8000/api/v1/abs/status | jq
+```
+
+---
+
+## 7. Updating
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+The `migrate` service runs `alembic upgrade head` automatically on every `up`, so schema migrations are applied without manual intervention.
+
+---
+
+## 8. Reverse Proxy (Nginx Proxy Manager / Traefik)
+
+BookScout exposes only port 8000. Add an NPM / Traefik proxy pass to put it behind TLS:
+
+```
+https://bookscout.home.yourdomain.com → http://bookscout:8000
+```
+
+No additional configuration is required inside BookScout — it trusts the `X-Forwarded-*` headers by default.
+
+---
+
+## 9. systemd (bare-metal alternative)
+
+If you run BookScout outside Docker, use the included `bookscout.service` as a template. Update the `ExecStart` and `EnvironmentFile` lines:
+
+```ini
+[Service]
+ExecStart=/usr/local/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+WorkingDirectory=/opt/bookscout
+EnvironmentFile=/opt/bookscout/.env
+```
+
+Database and Redis must be provided externally; set `DATABASE_URL` and `REDIS_URL` in the environment file.
+
+---
+
+## 10. Troubleshooting
+
+### Containers won't start
+
+```bash
+docker compose ps          # check which services are unhealthy
+docker compose logs migrate # check if Alembic migration failed
+docker compose logs postgres
+```
+
+### `bookscout-migrate` exits non-zero
+
+Usually a `DATABASE_URL` mismatch or the postgres service not healthy yet. Check:
+
+```bash
+docker compose logs migrate | tail -20
+```
+
+### Books not matching Audiobookshelf
+
+- Confirm `audiobookshelf.url` is reachable from inside the container (`docker exec bookscout curl $ABS_URL`)
+- Regen the ABS API token and update `config.yaml`
+- Run a re-scan: `POST /api/v1/scans/author/{id}`
+
+### Scan returns 0 books
+
+- Check `language_filter` in `config.yaml` — if set to `en` but the author's catalog is catalogued in another language, change to `all`
+- Google Books returns 429 intermittently — this is normal; Open Library and Audible catalog results are still used
+
+### Worker not processing jobs
+
+```bash
+docker compose logs worker
+# look for "arq: starting worker" and task execution lines
+```
+
+If Redis is unavailable the worker will exit — check `bookscout-redis` health.
+
+---
+
+## 11. Backup and Restore
+
+### Backup
+
+```bash
+# PostgreSQL dump
+docker exec bookscout-postgres pg_dump -U bookscout bookscout > bookscout-$(date +%F).sql
+
+# config.yaml
+cp /opt/bookscout/config.yaml /opt/bookscout/backups/config-$(date +%F).yaml
+```
+
+### Restore
+
+```bash
+docker exec -i bookscout-postgres psql -U bookscout bookscout < bookscout-YYYY-MM-DD.sql
+```
+
+---
 
 ## File Structure
 
 ```
 bookscout/
-├── 📄 QUICKSTART.md          ← Start here for 5-minute setup
-├── 📘 README.md              ← Full documentation
-├── 🏗️  ARCHITECTURE.md        ← How it works (technical)
-│
-├── 🐍 app.py                 ← Main Flask application (600+ lines)
-├── 📦 requirements.txt       ← Python dependencies
-│
-├── 🐳 Dockerfile             ← Docker image definition
-├── 🐳 docker-compose.yml     ← Docker Compose config
-├── 🚀 start.sh              ← One-command deployment script
-├── ⚙️  bookscout.service      ← systemd service (optional)
-│
-├── 📁 templates/             ← HTML templates
-│   ├── base.html            ← Base layout
-│   ├── index.html           ← Author watchlist page
-│   ├── author.html          ← Book listing page
-│   └── settings.html        ← Configuration page
-│
-├── 📁 static/                ← (empty - using CDN for CSS/JS)
-├── 🗄️  .env.example           ← Environment variables template
-└── 📝 .dockerignore          ← Docker ignore file
+├── main.py                  ← FastAPI entry point (uvicorn main:app)
+├── config.py                ← config.yaml loader with env-var overrides
+├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
+├── bookscout.service        ← systemd template
+├── api/v1/                  ← Route handlers
+│   ├── authors.py
+│   ├── books.py
+│   ├── scans.py
+│   ├── events.py            ← SSE stream
+│   ├── webhooks.py
+│   ├── search.py
+│   ├── abs.py
+│   ├── library_paths.py
+│   └── health.py
+├── core/
+│   ├── metadata.py          ← Multi-source catalog queries
+│   ├── merge.py             ← Deduplication logic
+│   ├── normalize.py         ← Author name normalisation + matching
+│   ├── confidence.py        ← Confidence scoring engine
+│   └── scanner.py           ← Filesystem scanner
+├── db/
+│   ├── models.py            ← SQLAlchemy async models
+│   ├── session.py           ← Async session factory
+│   └── alembic/             ← Migration scripts
+└── workers/
+    ├── settings.py          ← arq WorkerSettings
+    └── tasks.py             ← scan_author_task, scan_all_authors_task, …
 ```
-
-## What It Does
-
-✅ **Multi-Source Discovery**
-- Queries Open Library, Google Books, and Audnexus simultaneously
-- Merges results and removes duplicates
-- Finds 90%+ more books than single-source tools
-
-✅ **Audiobookshelf Integration**
-- Checks which books you already have
-- Marks them with green badges in the UI
-- No manual tracking needed
-
-✅ **Prowlarr Integration**
-- One-click search for missing books
-- Opens Prowlarr with pre-filled search
-- Download from your preferred indexers
-
-✅ **Clean Web Interface**
-- Bootstrap 5 responsive design
-- Works on desktop, tablet, mobile
-- No complicated configuration
-
-✅ **Author Watchlist**
-- Track your favorite authors
-- Scan individually or all at once
-- See complete bibliographies
-
-## Deployment Options
-
-### Option 1: Docker (Recommended)
-
-```bash
-cd bookscout
-./start.sh
-# Access at http://localhost:5000
-```
-
-**Pros:**
-- Isolated from system
-- Easy updates
-- Consistent environment
-
-### Option 2: Direct Python
-
-```bash
-cd bookscout
-pip install -r requirements.txt
-python app.py
-# Access at http://localhost:5000
-```
-
-**Pros:**
-- No Docker required
-- Direct file access
-- Easy debugging
-
-### Option 3: systemd Service
-
-```bash
-# Copy service file
-sudo cp bookscout.service /etc/systemd/system/
-# Edit paths in service file
-sudo systemctl daemon-reload
-sudo systemctl enable bookscout
-sudo systemctl start bookscout
-```
-
-**Pros:**
-- Runs at boot
-- System integration
-- Service management
-
-## First Steps
-
-1. **Deploy**
-   ```bash
-   cd bookscout
-   ./start.sh
-   ```
-
-2. **Configure** (http://localhost:5000/settings)
-   - Add Audiobookshelf URL + token
-   - Add Prowlarr URL + API key
-
-3. **Add Authors** (http://localhost:5000)
-   - Type "Andrew Rowe"
-   - Click "Add & Scan"
-   - Wait ~10 seconds
-
-4. **View Results**
-   - See complete bibliography
-   - Green badges = books you have
-   - Click "Search via Prowlarr" for missing books
-
-## Integration with Your Homelab
-
-**Current Setup:**
-- Readarr (limited metadata)
-- LazyLibrarian (confusing, incomplete)
-- OpenAudible (Audible purchases)
-- Audiobookshelf (library + playback)
-- Calibre (ebook management)
-- Prowlarr (indexer aggregation)
-
-**With BookScout:**
-```
-BookScout discovers → Prowlarr searches → Download client grabs
-                                                    ↓
-                                         OpenAudible (Audible)
-                                         or indexer download
-                                                    ↓
-                                         Calibre organizes
-                                                    ↓
-                                    Audiobookshelf serves & plays
-```
-
-## Next-Level Integration Ideas
-
-### 1. Nginx Proxy Manager
-Add SSL and custom domain:
-```
-https://books.yourdomain.com → BookScout
-```
-
-### 2. Scheduled Scanning
-Cron job to scan all authors weekly:
-```bash
-0 2 * * 0 curl http://localhost:5000/scan-all
-```
-
-### 3. Discord/Slack Notifications
-Modify `app.py` to send notifications when new books found
-
-### 4. n8n Workflow
-- BookScout finds new book
-- n8n triggers Prowlarr search
-- Auto-download if quality threshold met
-- Notify you when complete
-
-## Technical Highlights
-
-**Backend:**
-- Flask web framework
-- SQLite database
-- Multi-threaded API calls
-- Smart deduplication algorithm
-
-**APIs Used:**
-- Open Library (Internet Archive)
-- Google Books
-- Audnexus (Audible metadata)
-
-**Security:**
-- Local-only by default
-- API tokens in database
-- No external data transmission
-- No telemetry
-
-**Performance:**
-- Typical scan: 5-15 seconds
-- Handles 100+ authors easily
-- Lightweight (~200MB container)
-
-## Solving the Original Problem
-
-**Your Issue:** "7 books for Andrew Rowe, but he has 15+"
-
-**BookScout's Solution:**
-1. Queries 3 sources instead of 1
-2. Merges results intelligently
-3. Displays complete bibliography
-4. Integrates with your existing tools
-
-**Result:** You see ALL the books, not just what one incomplete database has.
-
-## Support Your Workflow
-
-This tool was built specifically for your use case:
-- Busy 60-hour work weeks ✅
-- Sophisticated homelab ✅
-- Multiple book sources ✅
-- Existing automation stack ✅
-- Want it to "just work" ✅
-
-## What's NOT Included
-
-❌ Automatic downloading (use Prowlarr for that)
-❌ Reading interface (use Audiobookshelf)
-❌ Ebook management (use Calibre)
-❌ Audible integration (use OpenAudible)
-
-**BookScout does ONE thing well:** Find all the books an author has written, from multiple sources, and tell you which ones you're missing.
-
-## Maintenance
-
-**Updates:** Pull new code, rebuild container
-**Backups:** Just save `bookscout.db` file
-**Logs:** `docker-compose logs -f bookscout`
-**Troubleshooting:** Check QUICKSTART.md
-
-## Time Investment
-
-- **Setup:** 5-10 minutes
-- **Configuration:** 2 minutes
-- **Adding authors:** 30 seconds each
-- **Daily use:** Click, done
-
-**Total ROI:** Way better than fighting with LazyLibrarian's UI or Readarr's incomplete data.
-
-## Ready to Go!
-
-Everything is built and tested. Just:
-
-```bash
-cd bookscout
-./start.sh
-```
-
-Then open http://localhost:5000 and add Andrew Rowe to see it in action.
-
----
-
-**Questions? Issues? Ideas?**
-
-Check the README.md for detailed docs, or just start using it and see what happens. It's designed to be self-explanatory.
-
-Happy book hunting! 📚

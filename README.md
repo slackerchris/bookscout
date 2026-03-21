@@ -1,229 +1,174 @@
 # BookScout 📚
 
-Multi-source book discovery and monitoring system that aggregates data from Open Library, Google Books, and Audnexus to find complete author bibliographies.
+Headless audiobook-tracking service. Queries Open Library, Google Books, and the Audible catalog to build complete author bibliographies, scores each book by confidence, checks your Audiobookshelf library for ownership, and delivers notifications via webhooks and SSE.
+
+There is **no web UI** — interaction is entirely through the REST API. Interactive docs are served at `/docs` (Swagger UI) and `/redoc`.
 
 ## Features
 
-- **Multi-Source Discovery**: Queries Open Library, Google Books, and Audnexus (Audible) simultaneously
-- **Smart Deduplication**: Automatically merges results from multiple sources
-- **Audiobookshelf Integration**: Checks which books you already have in your library
-- **Prowlarr Integration**: One-click search for missing books across all your indexers
-- **Author Watchlist**: Track your favorite authors and scan for new releases
-- **Web UI**: Clean, responsive interface built with Bootstrap
+- **Multi-source discovery** — Open Library, Google Books, and the Audible catalog API queried in parallel
+- **Confidence scoring** — every book gets a `HIGH / MEDIUM / LOW` band with per-reason breakdown
+- **Smart deduplication** — fuzzy author matching handles initials, name variants, and inverted surnames
+- **Filesystem scanner** — watches local library paths and cross-references files against catalog results
+- **Audiobookshelf integration** — marks books owned vs. missing against your ABS library
+- **Prowlarr / Jackett search** — one-call API to open a search for any missing book
+- **Webhooks + SSE** — push `book.missing`, `scan.complete`, and custom events to n8n, Discord, Mafl, etc.
+- **Scheduled scans** — cron-driven background worker (arq + Redis) rescans watchlist authors automatically
 
 ## Why BookScout?
 
-Existing tools like Readarr and LazyLibrarian have incomplete metadata databases. BookScout solves this by:
-1. Querying multiple sources simultaneously
-2. Merging and deduplicating results
-3. Providing significantly more complete author bibliographies
-
-Example: Andrew Rowe has 15+ published books, but most tools only show 6-7. BookScout finds them all.
+Readarr and LazyLibrarian have incomplete metadata databases. BookScout solves this by querying multiple sources in parallel, merging and deduplicating the results, and confidence-scoring each book. Example: an author with 30+ audiobooks typically returns 25–30 HIGH-confidence results where most tools show 10–15.
 
 ## Quick Start
 
-### Using Docker Compose (Recommended)
+### Docker Compose (recommended)
 
 ```bash
-# Clone or download the bookscout directory
+git clone https://github.com/slackerchris/bookscout.git
 cd bookscout
 
-# Optional: Create .env file with your API credentials
+# Copy the example env file (only POSTGRES_PASSWORD is required)
 cp .env.example .env
-# Edit .env with your settings
+$EDITOR .env
 
-# Build and start
-docker-compose up -d
+# Pull images and start all services
+docker compose up -d
 
-# Access at http://localhost:5000
+# Tail logs to confirm everything is healthy
+docker compose logs -f bookscout
 ```
 
-### Manual Setup
+API is available at **http://localhost:8000**
+Interactive docs at **http://localhost:8000/docs**
 
-```bash
-# Install dependencies
-pip install -r requirements.txt
+### Services started by docker-compose
 
-# Run the application
-python app.py
-
-# Access at http://localhost:5000
-```
+| Container | Role |
+|---|---|
+| `bookscout-postgres` | PostgreSQL 16 — primary datastore |
+| `bookscout-redis` | Redis 7 — job queue + event bus |
+| `bookscout-migrate` | Runs `alembic upgrade head` once, then exits |
+| `bookscout` | FastAPI service on port 8000 |
+| `bookscout-worker` | arq background worker (scans, webhooks) |
 
 ## Configuration
 
-### Option 1: Environment Variables
+Configuration is read from `/data/config.yaml` inside the container (mount a host file there), with environment variable overrides layered on top.
 
-Set these in your `.env` file or docker-compose.yml:
+### Minimal config.yaml
 
-```env
-AUDIOBOOKSHELF_URL=http://your-abs-server:13378
-AUDIOBOOKSHELF_TOKEN=your_token_here
-PROWLARR_URL=http://your-prowlarr:9696
-PROWLARR_API_KEY=your_key_here
+```yaml
+audiobookshelf:
+  url: http://abs:13378
+  token: your_abs_api_token
+
+prowlarr:
+  url: http://prowlarr:9696
+  api_key: your_prowlarr_api_key
+
+scan:
+  schedule_cron: "0 * * * *"   # rescan watchlist every hour
+  language_filter: en           # ISO 639-1; set to "all" to disable
 ```
 
-### Option 2: Web UI
+### Full config.yaml reference
 
-Navigate to Settings in the web interface and configure:
+```yaml
+database:
+  url: postgresql+asyncpg://bookscout:bookscout@postgres/bookscout
 
-**Audiobookshelf:**
-- URL: Full URL to your Audiobookshelf instance
-- API Token: Get from ABS Settings → Users → [Your User] → API Token
+redis:
+  url: redis://redis:6379
 
-**Prowlarr:**
-- URL: Full URL to your Prowlarr instance  
-- API Key: Get from Prowlarr Settings → General → API Key
+audiobookshelf:
+  url: ""
+  token: ""
 
-## Usage
+prowlarr:
+  url: ""
+  api_key: ""
 
-### Adding Authors
+jackett:
+  url: ""
+  api_key: ""
 
-1. Go to the home page
-2. Enter author name (e.g., "Andrew Rowe")
-3. Click "Add & Scan"
-4. BookScout will query all sources and display results
+apis:
+  google_books_key: ""    # optional — raises quota from 100 to 1000 req/day
+  isbndb_key: ""          # optional — enables ISBNdb source
 
-### Viewing Books
+scan:
+  schedule_cron: "0 * * * *"
+  max_concurrent_scans: 5
+  language_filter: en     # ISO 639-1 code, or "all" to accept all languages
 
-- Click "View Books" on any author to see their complete bibliography
-- Books you already have (in Audiobookshelf) are marked with a green badge
-- Missing books show a "Search via Prowlarr" button
-
-### Searching for Books
-
-Click "Search via Prowlarr" on any missing book to:
-1. Automatically search Prowlarr with the book title + author
-2. Open Prowlarr search results in a new tab
-3. Download from your preferred indexer
-
-### Scanning for Updates
-
-- **Single Author**: Click "Scan" on the author card or "Re-scan Now" on the author page
-- **All Authors**: Click "Scan All" in the navigation bar
-
-## Data Sources
-
-BookScout queries these APIs:
-
-1. **Open Library** - Comprehensive free database from Internet Archive
-2. **Google Books** - Google's book database with good metadata
-3. **Audnexus** - Community-maintained Audible metadata API
-
-## How It Works
-
-```
-User adds author → BookScout queries 3 APIs → Results merged & deduplicated
-                                                        ↓
-                                          Checks Audiobookshelf for matches
-                                                        ↓
-                                          Displays complete bibliography
-                                                        ↓
-                              User clicks "Search" → Opens in Prowlarr
+server:
+  host: 0.0.0.0
+  port: 8000
+  secret_key: change-me-in-production
 ```
 
-## Integration with Your Homelab
+All YAML keys can be overridden with environment variables: `DATABASE_URL`, `REDIS_URL`, `AUDIOBOOKSHELF_URL`, `AUDIOBOOKSHELF_TOKEN`, `PROWLARR_URL`, `PROWLARR_API_KEY`, `GOOGLE_BOOKS_API_KEY`, `ISBNDB_API_KEY`, `SECRET_KEY`.
 
-BookScout is designed to work alongside:
-- **Audiobookshelf**: Library management and playback
-- **Prowlarr**: Indexer aggregation and search
-- **OpenAudible**: Audible library backup
-- **Calibre**: Ebook management
-- **Readarr/LazyLibrarian**: Can complement (not replace) these tools
+## API Overview
 
-## Database
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Liveness probe |
+| `GET` | `/api/v1/authors` | List watchlist authors |
+| `POST` | `/api/v1/authors` | Add author to watchlist |
+| `DELETE` | `/api/v1/authors/{id}` | Remove author |
+| `GET` | `/api/v1/books` | List books (filterable by author, confidence, owned) |
+| `PATCH` | `/api/v1/books/{id}` | Update book metadata |
+| `POST` | `/api/v1/scans/author/{id}` | Enqueue scan for one author |
+| `POST` | `/api/v1/scans/all` | Enqueue scan for all watchlist authors |
+| `GET` | `/api/v1/search` | Unified search across authors + books |
+| `GET` | `/api/v1/library-paths` | List filesystem library paths |
+| `POST` | `/api/v1/library-paths` | Register a new library path |
+| `POST` | `/api/v1/library-paths/{id}/scan` | Trigger filesystem scan |
+| `GET` | `/api/v1/events` | SSE stream of live events |
+| `GET` | `/api/v1/webhooks` | List registered webhook consumers |
+| `POST` | `/api/v1/webhooks` | Register a webhook endpoint |
+| `GET` | `/api/v1/abs/status` | Audiobookshelf connection status |
 
-BookScout uses SQLite and stores:
-- Author watchlist
-- Book metadata from all sources
-- Scan history
-- Settings
+Full interactive docs with request/response schemas: **http://localhost:8000/docs**
 
-Database location: `./bookscout.db`
+## Homelab Integration
 
-## Ports
+```
+Audiobookshelf ──────► BookScout API
+                              │
+               ┌──────────────┼──────────────┐
+               ▼              ▼              ▼
+          Prowlarr        Webhooks         SSE
+        (search missing)  (n8n / Discord)  (Mafl dashboard)
+```
 
-- Web UI: `5000` (configurable in docker-compose.yml)
+- Register library paths so BookScout can cross-reference your actual files
+- Webhooks fire on `book.missing`, `book.found`, `scan.complete`
+- SSE feed (`/api/v1/events`) streams real-time scan progress
 
 ## Updating
 
 ```bash
-# Pull latest changes
-git pull  # or re-download files
-
-# Rebuild container
-docker-compose down
-docker-compose build
-docker-compose up -d
+docker compose pull
+docker compose up -d
 ```
 
-## Troubleshooting
+Migrations run automatically on startup via the `migrate` service.
 
-### Books Not Showing as "Have"
+## Data Sources
 
-- Verify Audiobookshelf URL and API token in Settings
-- Check that ABS is accessible from the BookScout container
-- Try re-scanning the author
-
-### Prowlarr Search Not Working
-
-- Verify Prowlarr URL and API key in Settings
-- Ensure Prowlarr is accessible from BookScout
-- Check Prowlarr logs for API errors
-
-### Missing Books for Author
-
-- Try re-scanning (data sources update over time)
-- Some very new releases may not be in all databases yet
-- Self-published or indie books may have limited coverage
-
-### API Rate Limits
-
-BookScout respects API rate limits, but if you scan many authors simultaneously:
-- Open Library: No rate limit (public API)
-- Google Books: 1000 requests/day (generous)
-- Audnexus: Rate limited to 60 requests/minute
-
-## Technical Details
-
-- **Backend**: Python 3.11 + Flask
-- **Database**: SQLite
-- **Frontend**: Bootstrap 5 + Vanilla JS
-- **Container**: Docker with slim Python base image
+| Source | Notes |
+|---|---|
+| Open Library | Internet Archive — comprehensive, no key required |
+| Google Books | Good series metadata; optional key raises daily quota |
+| Audible catalog | Production Audible API — best audiobook coverage |
 
 ## Privacy
 
-BookScout:
-- Runs entirely on your infrastructure
-- Makes API calls only to public book databases
-- Stores no data externally
-- Does not track or phone home
-
-## Roadmap
-
-Potential future features:
-- Email/Discord notifications for new releases
-- Scheduled automatic scanning
-- Series tracking and organization
-- GoodReads import/export
-- Custom metadata sources
-- More sophisticated matching algorithms
-
-## Contributing
-
-This was built as a custom solution for a specific need. Feel free to:
-- Fork and modify for your use case
-- Submit issues or suggestions
-- Improve the API integrations
+BookScout runs entirely on your infrastructure. It makes outbound calls only to the above public book catalog APIs. No telemetry, no tracking, no external data persistence.
 
 ## License
 
-Use it however you want. No warranty, use at your own risk.
+Use freely. No warranty — use at your own risk.
 
-## Credits
-
-Built to solve the problem of incomplete book metadata in existing automation tools. Inspired by frustration with Readarr, LazyLibrarian, and the general state of book automation tooling.
-
----
-
-**Note**: BookScout is for personal use to manage your legally acquired content. Respect copyright laws and support authors by purchasing their work.

@@ -55,10 +55,21 @@
 
 ---
 
+## [0.32.2] - 2026-03-21
 
-> **Full Flask → FastAPI cut-over.**  This release collapses the planned
-> v0.32–v0.39 roadmap into a single build.  All business logic is now
-> async-native, SQLite is gone, and `/docs` replaces the Flask UI.
+### Fixed
+- **`author_names_match()` missed spaced-initial variants** (`core/normalize.py`):
+  `"J.N. Chaney"` normalized to the single token `"jn"`, while `"J. N. Chaney"`
+  normalized to `["j", "n"]` — the existing initials logic could never reconcile
+  these. Added `_expand_initials()` which splits 2–3 character all-consonant
+  non-last tokens back into individual initials before comparison. Now matches:
+  `J.N. Chaney` ↔ `J. N. Chaney`, `John N. Chaney`, `Jason N. Chaney`,
+  `J.R.R. Tolkien` ↔ `J. R. R. Tolkien` ↔ `John Ronald Reuel Tolkien`.
+  No false positives introduced (`James Chaney`, `Jordan Chaney` still `False`).
+
+---
+
+## [0.32.0] - 2026-03-21
 
 ### Added
 - **FastAPI service** (`main.py`): replaces Flask (`app.py` deleted)

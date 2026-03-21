@@ -74,6 +74,48 @@
 
 ---
 
+## v0.40.0 — Stable Service Release
+
+**Status:** In Progress  
+**Goal:** Ship a production-ready deployment that requires zero follow-up surgery. All broken pipes fixed, docs match reality, deployment is push-and-run.
+
+### Definition of Done
+
+- [ ] README.md fully rewritten for the FastAPI headless service (port 8000, `/docs`, docker-compose)
+- [ ] DEPLOYMENT.md fully rewritten: `docker-compose up`, `config.yaml` layout, library-path registration via API, ABS integration
+- [ ] CHANGELOG entry for v0.40.0 with full summary of the v0.32.0→v0.40.0 arc
+- [ ] `VERSION` bumped to `0.40.0`
+- [ ] `main.py` `version` string updated to `0.40.0`
+- [ ] All routes covered by at least one `/docs` smoke-test pass (manual checklist below)
+- [ ] No stale references to Flask, `app.py`, port 5000, SQLite, `bookscout.db`, `./start.sh`, or `templates/` anywhere in the docs tree
+
+### Smoke-Test Checklist (manual, docker-compose)
+
+```
+docker compose up -d
+# verify all 5 containers healthy (db, redis, migrate, bookscout, worker)
+
+POST  /api/v1/authors       { "name": "J.N. Chaney" }
+GET   /api/v1/authors
+POST  /api/v1/scans/author/{id}
+GET   /api/v1/books?confidence=HIGH
+GET   /api/v1/library-paths
+POST  /api/v1/library-paths  { "path": "/mnt/audiobooks", "name": "NAS" }
+GET   /events                # SSE stream — confirm heartbeat
+```
+
+### Key Improvements Since v0.32.0
+
+| Area | Change |
+|---|---|
+| API source | Switched from dead Audnexus `/search` to Audible catalog API |
+| Language filtering | ISO 639-1 normalisation; default `language_filter: en` |
+| Filesystem scanner | `core/scanner.py` + `/api/v1/library-paths`; hybrid ABS/API mode |
+| Author matching | `_expand_initials()` in `core/normalize.py`; `"J.N."` ↔ `"J. N."` ↔ `"John N."` all match |
+| Documentation | README + DEPLOYMENT rewritten for FastAPI headless service |
+
+---
+
 ## Overview
 
 Transition BookScout from a user-triggered Flask web app into a fully autonomous async service. The domain logic (API querying, merge/dedupe, confidence scoring) is already proven; the work is replacing UI-driven triggers with scheduled/event-driven scanning, replacing SQLite with a proper relational schema, and exposing everything via a clean REST + SSE + webhook interface.
