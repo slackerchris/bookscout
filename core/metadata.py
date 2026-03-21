@@ -19,6 +19,31 @@ AUDNEXUS_API = "https://api.audnex.us"
 AUDIBLE_CATALOG_API = "https://api.audible.com/1.0/catalog/products"
 ISBNDB_API = "https://api2.isbndb.com"
 
+# Audnexus returns full language names; normalise to ISO 639-1 codes to match
+# the language_filter convention used by OpenLibrary and Google Books.
+_LANG_NAME_TO_ISO: dict[str, str] = {
+    "english": "en",
+    "german": "de",
+    "french": "fr",
+    "spanish": "es",
+    "portuguese": "pt",
+    "italian": "it",
+    "dutch": "nl",
+    "japanese": "ja",
+    "chinese": "zh",
+    "korean": "ko",
+    "russian": "ru",
+    "swedish": "sv",
+    "norwegian": "no",
+    "danish": "da",
+    "finnish": "fi",
+    "polish": "pl",
+    "czech": "cs",
+    "hungarian": "hu",
+    "romanian": "ro",
+    "turkish": "tr",
+}
+
 
 async def query_openlibrary(
     client: httpx.AsyncClient,
@@ -234,14 +259,14 @@ async def query_audnexus(
             "release_date": None,
             "cover_url": None,
             "format": "audiobook",
-            "language": "en",
+            "language": "en",  # overwritten by Audnexus detail if available
             "source": "Audnexus",
             "authors": product_authors or [author_name],
             "series": primary.get("title") if primary else None,
             "series_position": primary.get("sequence") if primary else None,
         }
 
-        # Best-effort enrichment: cover, ISBN, release date, canonical series
+        # Best-effort enrichment: cover, ISBN, release date, language, canonical series
         async with sem:
             try:
                 dr = await client.get(
@@ -255,6 +280,9 @@ async def query_audnexus(
                     book["description"] = (
                         detail.get("summary") or detail.get("description", "")
                     )
+                    if detail.get("language"):
+                        raw_lang = detail["language"].lower()
+                        book["language"] = _LANG_NAME_TO_ISO.get(raw_lang, raw_lang)
                     # Audnexus seriesPrimary is the canonical source — override
                     sp = detail.get("seriesPrimary")
                     if sp:
@@ -262,6 +290,11 @@ async def query_audnexus(
                         book["series_position"] = sp.get("position")
             except Exception:
                 pass
+
+        # Apply language filter (post-enrichment, since Audible API has no lang filter)
+        if language_filter and language_filter != "all":
+            if book["language"] != language_filter:
+                return None
 
         return book
 
