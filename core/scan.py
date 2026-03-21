@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from sqlalchemy import and_, select
+from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from confidence import score_books
@@ -210,6 +210,24 @@ async def scan_author_by_id(
             existing.confidence_band = book.get("confidence_band", "low")
             existing.score_reasons = score_reasons_str
             existing.updated_at = datetime.now(timezone.utc)
+
+            # Refresh co-author links: add any that are missing
+            existing_co_result = await session.execute(
+                select(BookAuthor.author_id).where(
+                    and_(
+                        BookAuthor.book_id == existing.id,
+                        BookAuthor.role == "co-author",
+                    )
+                )
+            )
+            existing_co_ids: set[int] = {row[0] for row in existing_co_result.fetchall()}
+            for co_name in co_authors:
+                co_author = await _get_or_create_author(session, co_name)
+                if co_author.id not in existing_co_ids:
+                    session.add(
+                        BookAuthor(book_id=existing.id, author_id=co_author.id, role="co-author")
+                    )
+
             updated_books += 1
 
     # Update watchlist last_scanned

@@ -1,5 +1,47 @@
 # BookScout Changelog
 
+## [0.40.0] - 2026-03-21
+
+> **Stable service release.**  Production-ready FastAPI headless service with
+> full Audible catalog coverage, per-source toggle flags, co-author re-scan fix,
+> and completely rewritten documentation.
+
+### Added
+- **`smoke_test.py`** — pipeline smoke test script with `--no-google` /
+  `--no-audible` / `--no-ol` / `--lang` / `--config` flags, per-source counts,
+  confidence breakdown, and sample HIGH-confidence titles
+- **`scan.sources` config block** — `openlibrary`, `google_books`, `audible`,
+  `isbndb` boolean flags in `config.yaml` to enable/disable individual sources
+  without redeploying
+- **`.gitignore`** — added `.env` and `config.yaml` to prevent accidental
+  credential commits
+
+### Fixed
+- **Audible pagination cap lifted** — previous hard limit of 4 pages (200
+  results); now paginates up to 20 pages (1 000 results) driven by
+  `total_results`.  J.N. Chaney: 200 → 298 English audiobooks (340 total,
+  42 filtered as non-English translated editions — correct behaviour)
+- **Co-author re-scan** — existing books now have co-author `book_authors` rows
+  added/refreshed on subsequent scans; previously co-authors were only written
+  on first insert
+- **`_LANG_NAME_TO_ISO` expanded** — added `pl`, `nl`, `ru`, `ja`, `zh`, `ko`,
+  `sv`, `da`, `no`, `fi`, `cs`, `hu`, `ro`, `tr` so full language names (e.g.
+  `"polish"`) normalise to ISO 639-1 codes correctly
+- **OpenLibrary error logging** — exception type now included in error message
+  (was silently printing empty string for `ReadTimeout`)
+
+### Changed
+- **README.md** — complete rewrite for FastAPI headless service: port 8000,
+  `/docs`, docker-compose quickstart, `config.yaml` reference, API endpoint
+  table, homelab integration diagram
+- **DEPLOYMENT.md** — complete rewrite: docker-compose workflow, `config.yaml`
+  setup, initial API walkthrough, webhook registration, ABS integration,
+  systemd bare-metal template, troubleshooting, backup/restore
+- **REFACTOR_PLAN.md** — added `## v0.40.0` section with definition of done,
+  smoke-test checklist, and key-improvements-since-v0.32.0 table
+
+---
+
 ## [0.37.0] - 2026-03-21
 
 > **Filesystem scanner + library path management.**  BookScout can now detect
