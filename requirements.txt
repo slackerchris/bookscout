@@ -1,3 +1,16 @@
 Flask==3.0.0
 requests==2.31.0
 Werkzeug==3.0.1
+
+# PostgreSQL (v0.31.0+)
+asyncpg>=0.29.0
+sqlalchemy[asyncio]>=2.0
+alembic>=1.13.0
+psycopg2-binary>=2.9
+
+# Redis / job queue (v0.32.0+)
+arq>=0.26.0
+redis>=5.0.0
+
+# Config (v0.36.0+)
+PyYAML>=6.0.1

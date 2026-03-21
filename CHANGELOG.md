@@ -1,5 +1,35 @@
 # BookScout Changelog
 
+## [0.31.0] - 2026-03-21
+
+### Added
+- **PostgreSQL support**: Full async schema via SQLAlchemy 2.0 + asyncpg
+  - Proper relational schema replaces SQLite flat tables
+  - Many-to-many `book_authors` join table with `role` discriminator (`author` / `co-author` / `narrator`) — replaces legacy `co_authors` JSON blob
+  - `watchlist` table separates "monitored authors" from raw author records
+  - `library_paths`, `webhooks`, `webhook_deliveries` tables added for upcoming v0.37 and v0.35 features
+  - Full index set on hot query paths (`isbn13`, `confidence_band`, `have_it`, `name_sort`, `author_id`)
+- **Alembic migrations** (`alembic.ini`, `db/migrations/`): Version-controlled schema management
+  - Async-compatible `env.py` using `asyncpg`
+  - `DATABASE_URL` env var overrides `alembic.ini` (Docker-friendly)
+  - Initial migration `0001_initial_schema.py` creates all tables with `alembic upgrade head`
+- **SQLite → PostgreSQL migration script** (`scripts/migrate_sqlite.py`)
+  - Idempotent: safe to re-run; skips already-migrated records
+  - Migrates authors, books, watchlist; explodes legacy `co_authors` JSON → `book_authors` rows
+  - `--dry-run` flag validates and counts without writing
+  - Usage: `python scripts/migrate_sqlite.py --sqlite /data/bookscout.db --postgres postgresql://...`
+- **Docker Compose** updated with PostgreSQL 16 + Redis 7 services
+  - Health checks on both services; bookscout `depends_on` both
+  - `POSTGRES_PASSWORD` env var (default: `bookscout` — change in production)
+  - Named volumes: `postgres-data`, `redis-data`, `bookscout-data`
+- **`db/models.py`**: SQLAlchemy async ORM models (used by Alembic and future FastAPI service)
+- **`db/session.py`**: Async engine + `AsyncSessionFactory` + `get_session()` FastAPI dependency
+
+### Note
+`app.py` continues running on SQLite for this version. The PostgreSQL schema is established and data migration tooling is ready. The Flask → FastAPI cutover happens in v0.33.0.
+
+---
+
 ## [0.30.0] - 2026-03-21
 
 ### Added

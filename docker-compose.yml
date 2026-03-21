@@ -14,6 +14,48 @@ services:
       - AUDIOBOOKSHELF_TOKEN=${AUDIOBOOKSHELF_TOKEN:-}
       - PROWLARR_URL=${PROWLARR_URL:-}
       - PROWLARR_API_KEY=${PROWLARR_API_KEY:-}
+      # PostgreSQL (used from v0.31.0 onwards)
+      - DATABASE_URL=postgresql+asyncpg://bookscout:${POSTGRES_PASSWORD:-bookscout}@postgres/bookscout
+      # Redis (used from v0.32.0 onwards)
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - bookscout
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: bookscout-postgres
+    environment:
+      POSTGRES_DB: bookscout
+      POSTGRES_USER: bookscout
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bookscout}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bookscout"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - bookscout
+
+  redis:
+    image: redis:7-alpine
+    container_name: bookscout-redis
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
     networks:
       - bookscout
@@ -21,3 +63,8 @@ services:
 networks:
   bookscout:
     driver: bridge
+
+volumes:
+  bookscout-data:
+  postgres-data:
+  redis-data:
