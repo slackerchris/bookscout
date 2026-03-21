@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import re
 
+_VOWELS = frozenset("aeiou")
+
 
 def normalize_author_name(name: str) -> str:
     """Lower-case, remove periods, collapse whitespace, strip common suffixes."""
@@ -13,13 +15,35 @@ def normalize_author_name(name: str) -> str:
     return n.strip()
 
 
+def _expand_initials(tokens: list[str]) -> list[str]:
+    """Expand combined initials in non-last tokens.
+
+    Tokens of 2–3 all-consonant characters before the last token are almost
+    certainly run-together initials (e.g. ``"jn"`` from ``"J.N."``).
+    Expanding them to individual characters lets the initials logic below
+    handle variations like ``"J.N. Chaney"`` ↔ ``"J. N. Chaney"`` ↔
+    ``"John N. Chaney"``.
+    """
+    if len(tokens) < 2:
+        return tokens
+    expanded: list[str] = []
+    for i, tok in enumerate(tokens):
+        is_last = i == len(tokens) - 1
+        if not is_last and 2 <= len(tok) <= 3 and all(c not in _VOWELS for c in tok):
+            expanded.extend(list(tok))  # "jn" → ["j", "n"]
+        else:
+            expanded.append(tok)
+    return expanded
+
+
 def author_names_match(search_name: str, book_author: str) -> bool:
     """Return True if the two author names refer to the same person.
 
     Handles:
     - Exact match after normalisation
     - One name being a subset of the other
-    - Abbreviated first names / initials (e.g. "J N Chaney" ↔ "Jason Nicholas Chaney")
+    - Abbreviated first names / initials (e.g. ``"J N Chaney"`` ↔ ``"Jason N. Chaney"``)
+    - Combined initials (e.g. ``"J.N. Chaney"`` ↔ ``"J. N. Chaney"`` ↔ ``"John N. Chaney"``)
     """
     s = normalize_author_name(search_name)
     b = normalize_author_name(book_author)
@@ -31,7 +55,18 @@ def author_names_match(search_name: str, book_author: str) -> bool:
     if sw.issubset(bw) or bw.issubset(sw):
         return True
 
-    sp, bp = s.split(), b.split()
+    # Expand combined initials before the last-name token, then retry
+    sp = _expand_initials(s.split())
+    bp = _expand_initials(b.split())
+
+    se = " ".join(sp)
+    be = " ".join(bp)
+    if se == be:
+        return True
+
+    sew, bew = set(sp), set(bp)
+    if sew.issubset(bew) or bew.issubset(sew):
+        return True
 
     # search uses initials → match against book's full first names
     if sp and bp and all(len(p) == 1 for p in sp[:-1]):
