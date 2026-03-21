@@ -1,5 +1,44 @@
 # BookScout Changelog
 
+## [0.41.0] - 2026-07-13
+
+> **Cross-watchlist deduplication + co-author discovery.**  Books shared by
+> multiple watched authors are now stored as a single canonical row.  Co-authors
+> that appear during scanning are surfaced via a new API endpoint and a Redis
+> event, with an optional flag to auto-add them to the watchlist.
+
+### Added
+- **`_find_existing_book` Phase-1 global lookup** — ISBN-13, ISBN, and ASIN
+  identity checks now search *all* books regardless of which author originally
+  added them.  When a cross-author match is found the scanning author is
+  immediately promoted to `role="author"` on the canonical `books` row and any
+  stale `role="co-author"` row for the same person is removed.  Eliminates
+  duplicate book rows for co-authored titles (e.g. a Chaney/Maggert series
+  no longer creates two separate `books` rows when each author is scanned).
+- **Co-author set-reconcile** — the update branch now performs a full
+  add/delete reconcile on `book_authors` rows instead of only appending
+  missing entries.  Stale co-author links removed from a book's metadata will
+  be cleaned up on the next scan.
+- **Co-author discovery** — after each scan, co-author names seen in fetched
+  books are checked against the watchlist.  Any that are not already watched
+  generate a `coauthor.discovered` Redis event
+  `{"event":"coauthor.discovered","author_id":…,"author_name":…,"coauthors":[…],"auto_added":…}`.
+- **`scan.auto_add_coauthors`** — boolean config flag (default `false`).  When
+  `true`, newly discovered co-authors are automatically added to the watchlist
+  so they will be scanned on the next scheduled run.
+- **`GET /api/v1/authors/{id}/coauthors`** — returns co-authors for a given
+  primary author, ordered by shared-book count descending.  Each entry includes
+  `id`, `name`, `on_watchlist`, and `book_count`.
+- **Migration `0002_deduplicate_books`** — data migration that groups existing
+  `books` rows by ASIN/ISBN-13/ISBN, retains the earliest `created_at` as
+  canonical, re-points `book_authors` to the canonical ID, and deletes
+  duplicates.
+
+### Fixed
+- **Cross-watchlist duplicate books** — root cause of the `_find_existing_book`
+  author-scoped filter that prevented recognition of books already in the
+  database under a different primary author.
+
 ## [0.40.0] - 2026-03-21
 
 > **Stable service release.**  Production-ready FastAPI headless service with

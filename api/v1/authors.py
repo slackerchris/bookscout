@@ -9,7 +9,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Author, Book, BookAuthor, Watchlist
@@ -35,6 +35,13 @@ class WatchlistSettings(BaseModel):
     scan_enabled: bool | None = None
 
 
+class CoAuthorOut(BaseModel):
+    id: int
+    name: str
+    on_watchlist: bool
+    book_count: int
+
+
 class AuthorOut(BaseModel):
     id: int
     name: str
@@ -56,6 +63,70 @@ class AuthorDetailOut(AuthorOut):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@router.get(
+    "/{author_id}/coauthors",
+    response_model=list[CoAuthorOut],
+    summary="List co-authors for an author",
+)
+async def list_coauthors(
+    author_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> list[CoAuthorOut]:
+    """Return authors who share at least one book with *author_id* as a
+    co-author, ordered by shared-book count descending."""
+    await _get_or_404(session, author_id)
+
+    # Books where the requested author is the primary author
+    authored_sq = (
+        select(BookAuthor.book_id)
+        .where(
+            and_(
+                BookAuthor.author_id == author_id,
+                BookAuthor.role == "author",
+            )
+        )
+        .scalar_subquery()
+    )
+
+    co_q = await session.execute(
+        select(
+            Author.id,
+            Author.name,
+            func.count(BookAuthor.book_id).label("book_count"),
+        )
+        .select_from(BookAuthor)
+        .join(Author, Author.id == BookAuthor.author_id)
+        .where(
+            and_(
+                BookAuthor.book_id.in_(authored_sq),
+                BookAuthor.role == "co-author",
+            )
+        )
+        .group_by(Author.id, Author.name)
+        .order_by(func.count(BookAuthor.book_id).desc())
+    )
+    rows = co_q.all()
+
+    if not rows:
+        return []
+
+    co_ids = [r.id for r in rows]
+    wl_q = await session.execute(
+        select(Watchlist.author_id).where(Watchlist.author_id.in_(co_ids))
+    )
+    watchlisted: set[int] = {r[0] for r in wl_q.fetchall()}
+
+    return [
+        CoAuthorOut(
+            id=r.id,
+            name=r.name,
+            on_watchlist=r.id in watchlisted,
+            book_count=r.book_count,
+        )
+        for r in rows
+    ]
+
 
 @router.get("/", response_model=list[AuthorOut], summary="List watched authors")
 async def list_authors(

@@ -42,6 +42,7 @@ _DEFAULT: dict = {
         "schedule_cron": "0 * * * *",
         "max_concurrent_scans": 5,
         "language_filter": "all",
+        "auto_add_coauthors": False,
         "sources": {
             "openlibrary": True,
             "google_books": True,
