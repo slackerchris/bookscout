@@ -70,7 +70,8 @@
 | 0.37.0 | Filesystem scanner (`core/scanner.py`) + `/api/v1/library-paths` + hybrid ABS mode | ✅ Done |
 | 0.38.0 | *(collapsed into v0.32.0)* | — |
 | 0.39.0 | *(collapsed into v0.32.0)* | — |
-| 0.40.0 | Stable service release | ⏳ Next |
+| 0.40.0 | Stable service release | ✅ Done |
+| 0.41.0 | Cross-watchlist dedup + co-author discovery | ⏳ Next |
 
 ---
 
@@ -113,6 +114,110 @@ GET   /events                # SSE stream — confirm heartbeat
 | Filesystem scanner | `core/scanner.py` + `/api/v1/library-paths`; hybrid ABS/API mode |
 | Author matching | `_expand_initials()` in `core/normalize.py`; `"J.N."` ↔ `"J. N."` ↔ `"John N."` all match |
 | Documentation | README + DEPLOYMENT rewritten for FastAPI headless service |
+
+---
+
+## v0.41.0 — Cross-Watchlist Dedup + Co-Author Discovery
+
+**Status:** Not Started  
+**Goal:** Eliminate duplicate book rows when co-authors share books across watchlist scans, and expose co-author discovery so users can grow their watchlist organically.
+
+### Problem 1 — Cross-Watchlist Duplicate Books
+
+**Root cause:** `_find_existing_book` in `core/scan.py` joins `book_authors` and
+filters on `author_id == <scanning author> AND role == "author"`.  When Author B
+(e.g. Terry Maggert) is scanned and a shared book (e.g. *Backyard Starship #1*)
+already exists from Author A's (J.N. Chaney's) scan, the query returns nothing —
+because Maggert is stored as `role="co-author"`, not `"author"` — and a
+duplicate `books` row is inserted with Maggert as the sole primary author.
+
+**Fix — two-phase lookup in `_find_existing_book`:**
+
+1. **Phase 1 — global identity lookup** (no author filter):  
+   Search by `isbn13 > isbn > asin` across the entire `books` table.  If found,
+   this is the canonical record regardless of which scan created it.
+2. **Phase 2 — title fallback** (current behaviour, author-scoped):  
+   Only used when no ISBN/ASIN match exists — scope to author to avoid
+   collisions on common titles.
+
+When phase 1 returns a hit, the update branch also adds a `role="author"`
+`book_authors` row for the scanning author (Maggert), so the book is correctly
+associated with both watchlist authors.  Any pre-existing `role="co-author"` row
+for that same author is removed (avoids having both roles for the same person).
+
+```
+Before fix:
+  books:        id=1  title="Backyard Starship #1"  (from Chaney scan)
+  books:        id=2  title="Backyard Starship #1"  (from Maggert scan — DUPE)
+  book_authors: (1, chaney,  "author")
+  book_authors: (1, maggert, "co-author")
+  book_authors: (2, maggert, "author")
+  book_authors: (2, chaney,  "co-author")
+
+After fix:
+  books:        id=1  title="Backyard Starship #1"  (single record)
+  book_authors: (1, chaney,  "author")
+  book_authors: (1, maggert, "author")   ← both watchlist authors linked
+```
+
+### Problem 2 — Stale Co-Author Link Removal
+
+Currently re-scan only *adds* missing co-author rows; it never removes ones that
+have become stale (e.g. a source incorrectly credited an extra author and a
+later scan corrects it).  Fix: replace the additive logic with a full
+set-reconcile — delete co-author rows not present in the fresh scan, add ones
+that are missing.
+
+### Problem 3 — Co-Author Discovery
+
+BookScout knows that Maggert co-wrote with Chaney but doesn't surface that
+information to the user or act on it.  Plan:
+
+- After each scan, collect the full set of co-author names seen across all
+  scanned books
+- Check which of those aren't already on the watchlist
+- Emit a `coauthor.discovered` SSE/webhook event with the list:
+  ```json
+  {
+    "event": "coauthor.discovered",
+    "triggered_by_author": "J.N. Chaney",
+    "coauthors": [
+      {"name": "Terry Maggert", "book_count": 47},
+      {"name": "Christopher Hopper", "book_count": 22}
+    ]
+  }
+  ```
+- Add `scan.auto_add_coauthors: false` config flag — when `true`, automatically
+  adds discovered co-authors to the watchlist and enqueues their scans
+- Add `GET /api/v1/authors/{id}/coauthors` endpoint — returns co-authors
+  discovered for a watchlist author with per-co-author book counts and a flag
+  indicating whether they're already on the watchlist
+
+### Tasks
+
+- [ ] `core/scan.py`: rewrite `_find_existing_book` — phase 1 global ASIN/ISBN
+  lookup, phase 2 author-scoped title fallback
+- [ ] `core/scan.py`: on cross-author hit, add `role="author"` link for scanning
+  author, remove stale `role="co-author"` for same person
+- [ ] `core/scan.py`: replace additive co-author refresh with set-reconcile
+  (delete stale rows + add missing rows)
+- [ ] `core/scan.py`: after scan, collect discovered co-authors + emit
+  `coauthor.discovered` event
+- [ ] `config.py`: add `scan.auto_add_coauthors: false` default
+- [ ] `core/scan.py`: if `auto_add_coauthors` enabled, enqueue watchlist adds
+  for new co-authors
+- [ ] `api/v1/authors.py`: add `GET /api/v1/authors/{id}/coauthors` endpoint
+- [ ] `CHANGELOG.md`: v0.41.0 entry
+- [ ] `VERSION` + `main.py`: bump to `0.41.0`
+
+### Migration note
+
+Existing duplicate book rows (from pre-fix scans) will need a one-off
+deduplication migration.  Add an Alembic data migration that:
+1. Groups `books` rows by `asin` / `isbn13` / `isbn` (where non-null)
+2. For each group, keeps the earliest `created_at` as canonical
+3. Repoints `book_authors` rows to the canonical id
+4. Deletes the duplicate rows
 
 ---
 
