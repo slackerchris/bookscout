@@ -24,16 +24,15 @@ async def scan_author_task(ctx: dict, author_id: int) -> dict[str, Any]:
 
 
 async def scan_all_authors_task(ctx: dict) -> dict[str, Any]:
-    """arq task: enqueue (or run) a scan for every active, enabled watchlist entry.
+    """arq task: enqueue an individual scan_author_task for every active watchlist entry.
 
-    Rather than doing all scans in a single task (which could time out), this
-    task enqueues individual ``scan_author_task`` jobs via the arq pool that
-    is stored in worker context.
+    Dispatches one job per author so each runs within its own timeout budget
+    rather than running all authors inline and hitting the single-job limit.
     """
+    from arq import ArqRedis
     from sqlalchemy import select
     from db.models import Author, Watchlist
 
-    config = get_config()
     redis_client = ctx.get("redis")
 
     async with AsyncSessionFactory() as session:
@@ -45,24 +44,21 @@ async def scan_all_authors_task(ctx: dict) -> dict[str, Any]:
         entries = result.scalars().all()
         author_ids = [e.author_id for e in entries]
 
-    scanned = 0
-    errors: list[dict] = []
-
-    for aid in author_ids:
-        try:
+    enqueued = 0
+    if redis_client is not None:
+        arq_redis = ArqRedis(redis_client)
+        for aid in author_ids:
+            await arq_redis.enqueue_job("scan_author_task", aid)
+            enqueued += 1
+    else:
+        # Fallback: run inline if no redis context (e.g. CLI usage)
+        config = get_config()
+        for aid in author_ids:
             async with AsyncSessionFactory() as session:
-                await scan_author_by_id(
-                    session, aid, config=config, redis_client=redis_client
-                )
-            scanned += 1
-        except Exception as exc:
-            errors.append({"author_id": aid, "error": str(exc)})
+                await scan_author_by_id(session, aid, config=config, redis_client=None)
+            enqueued += 1
 
-    return {
-        "total": len(author_ids),
-        "scanned": scanned,
-        "errors": errors,
-    }
+    return {"total": len(author_ids), "enqueued": enqueued}
 
 
 async def scan_library_path_task(ctx: dict, library_path_id: int) -> dict[str, Any]:

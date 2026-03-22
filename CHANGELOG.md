@@ -1,5 +1,20 @@
 # BookScout Changelog
 
+## [0.41.4] - 2026-03-22
+
+### Fixed
+- **`workers/tasks.py` — `scan_all_authors_task()`** — was running all author
+  scans inline in a single arq job, hitting the 300 s job timeout after just a
+  handful of authors.  Now enqueues one `scan_author_task` job per author via
+  `ArqRedis.enqueue_job()` so each author scan runs independently within its
+  own timeout budget.  Falls back to inline execution when no Redis context is
+  available (e.g. CLI usage).
+- **`workers/settings.py`** — raised `job_timeout` from 300 s to 600 s so a
+  single author scan (which hits Audible + OpenLibrary + Google Books in
+  parallel) has enough headroom even for prolific authors.
+
+---
+
 ## [0.41.3] - 2026-03-21
 
 > **Smarter ABS import deduplication.**  Author name variants like `"J.N. Chaney"`,

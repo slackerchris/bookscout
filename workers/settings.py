@@ -103,6 +103,6 @@ class WorkerSettings:
     on_startup = staticmethod(on_startup)
     on_shutdown = staticmethod(on_shutdown)
     max_jobs = 10
-    job_timeout = 300  # seconds per job
+    job_timeout = 600  # seconds per individual author scan (10 min)
     keep_result = 3600  # keep result for 1 hour
 
