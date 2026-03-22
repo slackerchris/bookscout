@@ -1,7 +1,7 @@
 """BookScout FastAPI application entry-point.
 
 Start with:
-    uvicorn main:app --host 0.0.0.0 --port 8000
+    uvicorn main:app --host 0.0.0.0 --port 8765
 
 Interactive API docs are available at  /docs  (Swagger UI)
                                 and at  /redoc (ReDoc)
@@ -61,7 +61,7 @@ app = FastAPI(
         "checks your Audiobookshelf library for ownership; "
         "delivers notifications via SSE and webhooks."
     ),
-    version="0.41.1",
+    version="0.41.2",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",

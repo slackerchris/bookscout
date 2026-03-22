@@ -2,7 +2,7 @@
 
 BookScout is a **headless REST API service** — there is no web UI.  All
 interaction is through HTTP endpoints.  Browse every endpoint interactively
-at **http://localhost:8000/docs** once the service is running.
+at **http://localhost:8765/docs** once the service is running.
 
 ---
 
@@ -24,12 +24,12 @@ docker-compose up -d
 ```
 
 Three containers start:
-- **bookscout** — FastAPI service on port **8000**
+- **bookscout** — FastAPI service on port **8765**
 - **postgres** — PostgreSQL database
 - **redis** — Redis instance (job queue + event bus)
 
-API: **http://localhost:8000**  
-Interactive docs: **http://localhost:8000/docs**
+API: **http://localhost:8765**  
+Interactive docs: **http://localhost:8765/docs**
 
 ### Minimal config.yaml
 
@@ -49,7 +49,7 @@ working defaults.
 ```bash
 pip install -r requirements.txt
 # PostgreSQL and Redis must already be running — see DEPLOYMENT.md
-uvicorn main:app --host 0.0.0.0 --port 8000
+uvicorn main:app --host 0.0.0.0 --port 8765
 ```
 
 Set `DATABASE_URL` and `REDIS_URL` environment variables, or configure them
@@ -62,7 +62,7 @@ in `config.yaml`.
 ### 1. Confirm the service is healthy
 
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8765/health
 # {"status":"ok","version":"0.41.0",
 #  "components":{"database":"ok","redis":"ok"}}
 ```
@@ -72,7 +72,7 @@ If `status` is `"degraded"` check `docker-compose logs` for the failing componen
 ### 2. Add an author to your watchlist
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/authors/ \
+curl -X POST http://localhost:8765/api/v1/authors/ \
      -H "Content-Type: application/json" \
      -d '{"name": "J.N. Chaney"}'
 # {"id": 1, "name": "J.N. Chaney", "active": true, ...}
@@ -81,14 +81,14 @@ curl -X POST http://localhost:8000/api/v1/authors/ \
 ### 3. Trigger a scan
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/scans/1
+curl -X POST http://localhost:8765/api/v1/scans/1
 # {"job_id": "abc123", "status": "queued"}
 ```
 
 The scan runs in the background via the arq worker.  Wait a few seconds, then:
 
 ```bash
-curl "http://localhost:8000/api/v1/books/?author_id=1"
+curl "http://localhost:8765/api/v1/books/?author_id=1"
 ```
 
 Each book has:
@@ -100,7 +100,7 @@ Each book has:
 ### 4. Scan all watched authors at once
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/scans/all
+curl -X POST http://localhost:8765/api/v1/scans/all
 ```
 
 ---

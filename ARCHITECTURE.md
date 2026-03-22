@@ -9,7 +9,7 @@ is no web UI — all interaction is via HTTP endpoints documented at `/docs`.
 ┌──────────────────────────────────────────────────────────────────┐
 │                        BookScout                                  │
 │                    (FastAPI / uvicorn)                            │
-│                       port 8000                                   │
+│                       port 8765                                   │
 └──────────────────┬───────────────────────────────────────────────┘
                    │  REST API calls
          ┌─────────┴──────────┐
@@ -192,7 +192,7 @@ Deployment:
 - api2.isbndb.com (port 443) — optional, requires API key
 
 **Inbound (client → BookScout):**
-- Port 8000 (REST API)
+- Port 8765 (REST API)
 
 **Local network (BookScout → your services):**
 - Audiobookshelf (typically port 13378)

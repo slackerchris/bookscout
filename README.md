@@ -38,8 +38,8 @@ docker compose up -d
 docker compose logs -f bookscout
 ```
 
-API is available at **http://localhost:8000**
-Interactive docs at **http://localhost:8000/docs**
+API is available at **http://localhost:8765**
+Interactive docs at **http://localhost:8765/docs**
 
 ### Services started by docker-compose
 
@@ -48,7 +48,7 @@ Interactive docs at **http://localhost:8000/docs**
 | `bookscout-postgres` | PostgreSQL 16 — primary datastore |
 | `bookscout-redis` | Redis 7 — job queue + event bus |
 | `bookscout-migrate` | Runs `alembic upgrade head` once, then exits |
-| `bookscout` | FastAPI service on port 8000 |
+| `bookscout` | FastAPI service on port 8765 |
 | `bookscout-worker` | arq background worker (scans, webhooks) |
 
 ## Configuration
@@ -103,7 +103,7 @@ scan:
 
 server:
   host: 0.0.0.0
-  port: 8000
+  port: 8765
   secret_key: change-me-in-production
 ```
 
@@ -130,7 +130,7 @@ All YAML keys can be overridden with environment variables: `DATABASE_URL`, `RED
 | `POST` | `/api/v1/webhooks` | Register a webhook endpoint |
 | `GET` | `/api/v1/abs/status` | Audiobookshelf connection status |
 
-Full interactive docs with request/response schemas: **http://localhost:8000/docs**
+Full interactive docs with request/response schemas: **http://localhost:8765/docs**
 
 ## Homelab Integration
 

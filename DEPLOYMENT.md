@@ -79,7 +79,7 @@ bookscout  | [bookscout] started — API docs at /docs
 | `bookscout-postgres` | `postgres:16-alpine` | Primary datastore |
 | `bookscout-redis` | `redis:7-alpine` | Job queue + event bus |
 | `bookscout-migrate` | `ghcr.io/slackerchris/bookscout` | One-shot Alembic migration |
-| `bookscout` | `ghcr.io/slackerchris/bookscout` | FastAPI on port 8000 |
+| `bookscout` | `ghcr.io/slackerchris/bookscout` | FastAPI on port 8765 |
 | `bookscout-worker` | `ghcr.io/slackerchris/bookscout` | arq background scanner |
 
 ---
@@ -88,11 +88,11 @@ bookscout  | [bookscout] started — API docs at /docs
 
 ```bash
 # Health probe
-curl http://localhost:8000/health
+curl http://localhost:8765/health
 # {"status":"ok","version":"0.40.0"}
 
 # Open interactive docs
-open http://localhost:8000/docs
+open http://localhost:8765/docs
 ```
 
 ---
@@ -102,7 +102,7 @@ open http://localhost:8000/docs
 ### Add your first author
 
 ```bash
-curl -s -X POST http://localhost:8000/api/v1/authors \
+curl -s -X POST http://localhost:8765/api/v1/authors \
   -H "Content-Type: application/json" \
   -d '{"name": "J.N. Chaney"}' | jq
 ```
@@ -111,24 +111,24 @@ curl -s -X POST http://localhost:8000/api/v1/authors \
 
 ```bash
 # Replace 1 with the id returned above
-curl -s -X POST http://localhost:8000/api/v1/scans/author/1 | jq
+curl -s -X POST http://localhost:8765/api/v1/scans/author/1 | jq
 ```
 
 ### Check scan results
 
 ```bash
-curl -s "http://localhost:8000/api/v1/books?author_id=1&confidence=HIGH" | jq
+curl -s "http://localhost:8765/api/v1/books?author_id=1&confidence=HIGH" | jq
 ```
 
 ### Register a filesystem library path
 
 ```bash
-curl -s -X POST http://localhost:8000/api/v1/library-paths \
+curl -s -X POST http://localhost:8765/api/v1/library-paths \
   -H "Content-Type: application/json" \
   -d '{"path": "/mnt/audiobooks", "name": "NAS audiobooks"}' | jq
 
 # Trigger a filesystem scan
-curl -s -X POST http://localhost:8000/api/v1/library-paths/1/scan | jq
+curl -s -X POST http://localhost:8765/api/v1/library-paths/1/scan | jq
 ```
 
 ---
@@ -138,7 +138,7 @@ curl -s -X POST http://localhost:8000/api/v1/library-paths/1/scan | jq
 Register a consumer to receive `book.missing` and `scan.complete` events:
 
 ```bash
-curl -s -X POST http://localhost:8000/api/v1/webhooks \
+curl -s -X POST http://localhost:8765/api/v1/webhooks \
   -H "Content-Type: application/json" \
   -d '{
     "url": "http://n8n:5678/webhook/bookscout",
@@ -154,7 +154,7 @@ Webhook payloads are delivered as `POST` with a JSON body. Failed deliveries are
 Connect any client to the live event stream:
 
 ```bash
-curl -N http://localhost:8000/api/v1/events
+curl -N http://localhost:8765/api/v1/events
 ```
 
 ---
@@ -166,7 +166,7 @@ BookScout calls the ABS API to check which books are already in your library. Th
 To verify the connection:
 
 ```bash
-curl -s http://localhost:8000/api/v1/abs/status | jq
+curl -s http://localhost:8765/api/v1/abs/status | jq
 ```
 
 ---
@@ -184,10 +184,10 @@ The `migrate` service runs `alembic upgrade head` automatically on every `up`, s
 
 ## 8. Reverse Proxy (Nginx Proxy Manager / Traefik)
 
-BookScout exposes only port 8000. Add an NPM / Traefik proxy pass to put it behind TLS:
+BookScout exposes only port 8765. Add an NPM / Traefik proxy pass to put it behind TLS:
 
 ```
-https://bookscout.home.yourdomain.com → http://bookscout:8000
+https://bookscout.home.yourdomain.com → http://bookscout:8765
 ```
 
 No additional configuration is required inside BookScout — it trusts the `X-Forwarded-*` headers by default.
@@ -200,7 +200,7 @@ If you run BookScout outside Docker, use the included `bookscout.service` as a t
 
 ```ini
 [Service]
-ExecStart=/usr/local/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+ExecStart=/usr/local/bin/uvicorn main:app --host 0.0.0.0 --port 8765
 WorkingDirectory=/opt/bookscout
 EnvironmentFile=/opt/bookscout/.env
 ```

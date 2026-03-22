@@ -1,5 +1,16 @@
 # BookScout Changelog
 
+## [0.41.2] - 2026-03-21
+
+### Changed
+- **Default port changed from 8000 to 8765** — avoids conflict with Portainer
+  (port 8000) and stays clear of all common `*arr` suite ports (Sonarr 8989,
+  Radarr 7878, Lidarr 8686, Readarr 8787, Prowlarr 9696, Jackett 9117).
+  Updated in `Dockerfile`, `docker-compose.yml`, `bookscout.service`,
+  `config.yaml.example`, `.env.example`, and all documentation.
+
+---
+
 ## [0.41.1] - 2026-03-21
 
 > **Structured JSON logging.**  All `print()` calls replaced with a proper

@@ -32,7 +32,7 @@ ENV PYTHONUNBUFFERED=1
 ENV BOOKSCOUT_CONFIG=/data/config.yaml
 
 # API port
-EXPOSE 8000
+EXPOSE 8765
 
 # Default: run the FastAPI service
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8765"]

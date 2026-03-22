@@ -42,5 +42,5 @@ scan:
 
 server:
   host: "0.0.0.0"
-  port: 8000
+  port: 8765
   secret_key: "bookscout-secret-key-change-in-production"  # also: SECRET_KEY
