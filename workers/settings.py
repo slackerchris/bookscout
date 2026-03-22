@@ -1,7 +1,13 @@
 """arq WorkerSettings — start with ``arq workers.settings.WorkerSettings``."""
 from __future__ import annotations
 
+import logging
 import os
+
+from core.logging_config import setup_logging
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 from arq import cron as arq_cron
 from arq.connections import RedisSettings
@@ -61,10 +67,10 @@ def _build_cron_jobs() -> list:
         scan_cfg = getattr(config, "scan", None)
         cron_str = getattr(scan_cfg, "schedule_cron", "0 * * * *") or "0 * * * *"
         kwargs = _cron_kwargs(cron_str)
-        print(f"[scheduler] schedule: '{cron_str}' → {kwargs}")
+        logger.info("Scan schedule configured", extra={"cron": cron_str, "kwargs": str(kwargs)})
         return [arq_cron(scan_all_authors_task, **kwargs)]
     except Exception as exc:
-        print(f"[scheduler] failed to parse schedule_cron — scheduled scanning disabled: {exc}")
+        logger.warning("Failed to parse schedule_cron — scheduled scanning disabled", extra={"error": str(exc)})
         return []
 
 

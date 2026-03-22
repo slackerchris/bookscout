@@ -1,6 +1,7 @@
 """Webhook registration and delivery log."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 import httpx
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import Webhook, WebhookDelivery
 from db.session import get_session
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
@@ -162,7 +164,7 @@ async def _deliver(url: str, payload: dict) -> tuple[bool, int | None]:
             r = await client.post(url, json=payload, timeout=10)
             return r.status_code < 400, r.status_code
     except Exception as exc:
-        print(f"[webhook] delivery failed to {url}: {exc}")
+        logger.error("Webhook delivery failed", extra={"url": url, "error": str(exc)})
         return False, None
 
 

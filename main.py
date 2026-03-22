@@ -8,11 +8,17 @@ Interactive API docs are available at  /docs  (Swagger UI)
 """
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from core.logging_config import setup_logging
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -37,14 +43,14 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     arq_pool = await create_pool(RedisSettings.from_dsn(redis_url))
     application.state.arq_pool = arq_pool
 
-    print("[bookscout] started — API docs at /docs")
+    logger.info("BookScout started", extra={"docs": "/docs"})
 
     yield
 
     # Cleanup
     await arq_pool.aclose()
     await redis_client.aclose()
-    print("[bookscout] shutdown complete")
+    logger.info("BookScout shutdown complete")
 
 
 app = FastAPI(

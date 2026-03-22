@@ -7,11 +7,14 @@ access, no config reads — so they're easy to test in isolation.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 import httpx
 
 from core.normalize import author_names_match
+
+logger = logging.getLogger(__name__)
 
 OPENLIBRARY_API = "https://openlibrary.org/search.json"
 GOOGLE_BOOKS_API = "https://www.googleapis.com/books/v1/volumes"
@@ -60,7 +63,7 @@ async def query_openlibrary(
         r.raise_for_status()
         data = r.json()
     except Exception as exc:
-        print(f"[OpenLibrary] error: {type(exc).__name__}: {exc}")
+        logger.error("OpenLibrary query failed", extra={"author": author_name, "error": str(exc), "exc_type": type(exc).__name__})
         return []
 
     books: list[dict[str, Any]] = []
@@ -122,7 +125,7 @@ async def query_google_books(
         r.raise_for_status()
         data = r.json()
     except Exception as exc:
-        print(f"[GoogleBooks] error: {exc}")
+        logger.error("GoogleBooks query failed", extra={"author": author_name, "error": str(exc)})
         return []
 
     all_items: list[dict] = list(data.get("items", []))
@@ -211,7 +214,7 @@ async def query_audnexus(
             r.raise_for_status()
             data = r.json()
         except Exception as exc:
-            print(f"[Audible] error on page {page}: {exc}")
+            logger.error("Audible page fetch failed", extra={"author": author_name, "page": page, "error": str(exc)})
             break
 
         products = data.get("products", [])
@@ -323,11 +326,11 @@ async def query_isbndb(
             timeout=15,
         )
         if r.status_code != 200:
-            print(f"[ISBNdb] HTTP {r.status_code}")
+            logger.warning("ISBNdb non-200 response", extra={"author": author_name, "status": r.status_code})
             return []
         data = r.json()
     except Exception as exc:
-        print(f"[ISBNdb] error: {exc}")
+        logger.error("ISBNdb query failed", extra={"author": author_name, "error": str(exc)})
         return []
 
     books: list[dict[str, Any]] = []
@@ -398,6 +401,6 @@ async def search_audible_metadata_direct(
             return series_primary.get("name"), series_primary.get("position")
 
     except Exception as exc:
-        print(f"[Audible] metadata error for '{book_title}': {exc}")
+        logger.warning("Audible direct metadata lookup failed", extra={"title": book_title, "error": str(exc)})
 
     return None, None

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -36,6 +37,8 @@ from core.metadata import (
 )
 from core.normalize import author_names_match
 from db.models import Author, Book, BookAuthor, Watchlist
+
+logger = logging.getLogger(__name__)
 
 
 async def scan_author_by_id(
@@ -84,7 +87,7 @@ async def scan_author_by_id(
         raise ValueError(f"Author {author_id} not found")
 
     author_name = author.name
-    print(f"[scan] '{author_name}' (lang={language_filter})")
+    logger.info("Scan started", extra={"author_id": author_id, "author": author_name, "lang": language_filter})
 
     # ------------------------------------------------------------------ API queries
     async with httpx.AsyncClient() as client:
@@ -317,9 +320,15 @@ async def scan_author_by_id(
         )
         await redis_client.publish("bookscout:events", co_payload)
 
-    print(
-        f"[scan] '{author_name}': {len(all_books)} found, "
-        f"{new_books} new, {updated_books} updated"
+    logger.info(
+        "Scan complete",
+        extra={
+            "author_id": author_id,
+            "author": author_name,
+            "books_found": len(all_books),
+            "new_books": new_books,
+            "updated_books": updated_books,
+        },
     )
     return {
         "author_id": author_id,

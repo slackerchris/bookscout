@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import io
+import logging
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +47,7 @@ async def search_prowlarr(
             for item in r.json()
         ]
     except Exception as exc:
-        print(f"[Prowlarr] search error: {exc}")
+        logger.error("Prowlarr search failed", extra={"query": query, "error": str(exc)})
         return []
 
 
@@ -80,7 +83,7 @@ async def search_jackett(
             for item in r.json().get("Results", [])
         ]
     except Exception as exc:
-        print(f"[Jackett] search error: {exc}")
+        logger.error("Jackett search failed", extra={"query": query, "error": str(exc)})
         return []
 
 
@@ -150,7 +153,7 @@ async def send_to_sabnzbd(
         )
         return r.status_code == 200 and bool(r.json().get("status"))
     except Exception as exc:
-        print(f"[SABnzbd] error: {exc}")
+        logger.error("SABnzbd send failed", extra={"title": title, "error": str(exc)})
         return False
 
 
@@ -168,7 +171,7 @@ async def send_to_torrent_client(
         return await _send_qbittorrent(client, download_url, client_url, username, password)
     if client_type == "transmission":
         return await _send_transmission(client, download_url, client_url, username, password)
-    print(f"[download] unsupported client type: {client_type}")
+    logger.warning("Unsupported download client type", extra={"client_type": client_type})
     return False
 
 
@@ -195,7 +198,7 @@ async def _send_qbittorrent(
         )
         return r.status_code == 200 and r.text.strip() == "Ok."
     except Exception as exc:
-        print(f"[qBittorrent] error: {exc}")
+        logger.error("qBittorrent send failed", extra={"error": str(exc)})
         return False
 
 
@@ -219,5 +222,5 @@ async def _send_transmission(
         )
         return r.json().get("result") == "success"
     except Exception as exc:
-        print(f"[Transmission] error: {exc}")
+        logger.error("Transmission send failed", extra={"error": str(exc)})
         return False

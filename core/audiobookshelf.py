@@ -4,7 +4,11 @@ Accepts pre-configured URL and token so callers remain in control of config.
 """
 from __future__ import annotations
 
+import logging
+
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 async def check_audiobookshelf(
@@ -68,7 +72,7 @@ async def check_audiobookshelf(
                     return True, sn, sp
 
     except Exception as exc:
-        print(f"[ABS] check error: {exc}")
+        logger.error("ABS ownership check failed", extra={"title": book_title, "author": author_name, "error": str(exc)})
 
     return False, None, None
 
@@ -124,6 +128,6 @@ async def get_all_authors_from_audiobookshelf(
                 page += 1
 
     except Exception as exc:
-        print(f"[ABS] authors error: {exc}")
+        logger.error("ABS authors fetch failed", extra={"error": str(exc)})
 
     return sorted(authors)
