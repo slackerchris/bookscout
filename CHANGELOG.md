@@ -1,5 +1,30 @@
 # BookScout Changelog
 
+## [0.41.1] - 2026-03-21
+
+> **Structured JSON logging.**  All `print()` calls replaced with a proper
+> `logging` setup that emits newline-delimited JSON — ready for Loki, Grafana,
+> or any log aggregator.
+
+### Added
+- **`core/logging_config.py`** — `setup_logging()` configures the root logger to
+  emit newline-delimited JSON via `python-json-logger`.  Reads `LOG_LEVEL` env
+  var (default `INFO`); gracefully falls back to plain text if the package is
+  absent.  Suppresses noisy third-party loggers (`httpx`, `httpcore`,
+  `uvicorn.access`, `sqlalchemy.engine`).
+- **`LOG_LEVEL` env var** — exposed in `docker-compose.yml` for both `bookscout`
+  and `worker` services (`${LOG_LEVEL:-INFO}`); documented in `.env.example`.
+- **`python-json-logger>=2.0.7`** added to `requirements.txt`.
+
+### Changed
+- **All 18 `print()` calls replaced** with structured `logger.*` calls across
+  `main.py`, `workers/settings.py`, `core/metadata.py`, `core/scan.py`,
+  `core/audiobookshelf.py`, `core/search.py`, and `api/v1/webhooks.py`.
+- Key structured log events include `author_id`, `books_found`, `new_books`,
+  `updated_books`, `error`, and `exc_type` fields for machine-readable filtering.
+
+---
+
 ## [0.41.0] - 2026-07-13
 
 > **Cross-watchlist deduplication + co-author discovery + scheduled scanning.**
