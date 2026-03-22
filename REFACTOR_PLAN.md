@@ -71,7 +71,11 @@
 | 0.38.0 | *(collapsed into v0.32.0)* | — |
 | 0.39.0 | *(collapsed into v0.32.0)* | — |
 | 0.40.0 | Stable service release | ✅ Done |
-| 0.41.0 | Cross-watchlist dedup + co-author discovery | ⏳ Next |
+| 0.41.0 | Cross-watchlist dedup + co-author discovery + structured logging | ✅ Done |
+| 0.42.0 | Author identity resolution (`author_aliases`) + scan metrics (`scan_events`) | 🔜 Next |
+| 0.43.0 | pytest suite for `core/` | 📋 Planned |
+| 0.44.0 | Metadata response caching with TTL | 📋 Planned |
+| 0.45.0 | Webhook retry with exponential backoff + dead endpoint detection | 📋 Planned |
 
 ---
 
@@ -722,3 +726,228 @@ rich>=13.0.0
 ---
 
 *Last Updated: March 21, 2026*
+
+---
+
+## v0.42.0 — Author Identity Resolution + Scan Metrics
+
+**Status:** Not Started  
+**Goal:** Permanently fix multi-name author identity issues (`J.N. Chaney` / `J. N. Chaney` / `Jason N. Chaney`) via a first-class `author_aliases` table, and capture per-scan metrics in a queryable `scan_events` table that complements the structured JSON logging.
+
+---
+
+### Feature 1 — `author_aliases` Table
+
+**Problem:** `_expand_initials()` in `core/normalize.py` handles the most common J.N.-style variants but is purely heuristic — it can't handle arbitrary alternate names, pen names, or transliteration variants (`Tolkien` / `JRRT` / `John Ronald Reuel Tolkien`).  Any new edge case requires a code change.
+
+**Solution:** Introduce an `author_aliases` table that stores known alternate names for a canonical `authors` row.  `author_names_match()` checks aliases before falling back to the fuzzy heuristics.
+
+```sql
+CREATE TABLE author_aliases (
+    id          SERIAL PRIMARY KEY,
+    author_id   INT NOT NULL REFERENCES authors(id) ON DELETE CASCADE,
+    alias       TEXT NOT NULL,
+    alias_normalized TEXT NOT NULL,   -- result of normalize_name(alias)
+    source      TEXT DEFAULT 'manual', -- 'manual' | 'api' | 'inferred'
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (author_id, alias_normalized)
+);
+
+CREATE INDEX idx_author_aliases_normalized ON author_aliases(alias_normalized);
+```
+
+**Lookup flow in `author_names_match()`:**
+1. Exact normalized match (current step 1) — no change
+2. **NEW:** Check `author_aliases` — if either name matches any alias for the same author, return `True`
+3. Initials expansion heuristic (current fallback) — kept as last resort
+
+**API additions:**
+- `GET /api/v1/authors/{id}/aliases` — list aliases
+- `POST /api/v1/authors/{id}/aliases` — add alias `{ "alias": "J.N. Chaney" }`
+- `DELETE /api/v1/authors/{id}/aliases/{alias_id}` — remove alias
+
+**Auto-population:** During scan, when `author_names_match()` returns `True` via the heuristic path, optionally persist the matched variant as an `'inferred'` alias so the heuristic is never re-run for that pair.
+
+### Tasks
+
+- [ ] `db/migrations/` — Alembic migration `0003_author_aliases.py`
+- [ ] `db/models.py` — `AuthorAlias` ORM model
+- [ ] `core/normalize.py` — `author_names_match()` gains DB alias lookup (injected session)
+- [ ] `core/scan.py` — on heuristic-path match, persist alias as `source='inferred'` (behind `scan.infer_aliases: true` config flag)
+- [ ] `api/v1/authors.py` — 3 new alias CRUD endpoints
+- [ ] `config.py` — `scan.infer_aliases: false` default
+
+---
+
+### Feature 2 — `scan_events` Table
+
+**Problem:** Scan outcomes are logged as structured JSON lines (added in v0.41.0) but are not queryable — you can't ask "how many new books has Chaney yielded over the last 30 scans?" without grepping logs.
+
+**Solution:** After each scan, write one row to a `scan_events` table capturing the key metrics that are already being logged.
+
+```sql
+CREATE TABLE scan_events (
+    id             SERIAL PRIMARY KEY,
+    author_id      INT REFERENCES authors(id) ON DELETE SET NULL,
+    triggered_by   TEXT DEFAULT 'scheduler',  -- 'scheduler' | 'manual' | 'webhook'
+    status         TEXT NOT NULL,              -- 'success' | 'error'
+    books_found    INT DEFAULT 0,
+    new_books      INT DEFAULT 0,
+    updated_books  INT DEFAULT 0,
+    error_message  TEXT,
+    duration_ms    INT,
+    started_at     TIMESTAMPTZ NOT NULL,
+    completed_at   TIMESTAMPTZ
+);
+
+CREATE INDEX idx_scan_events_author ON scan_events(author_id, started_at DESC);
+CREATE INDEX idx_scan_events_started ON scan_events(started_at DESC);
+```
+
+**API additions:**
+- `GET /api/v1/scans/history?author_id=&limit=50` — paginated scan history
+- `GET /api/v1/scans/history/{scan_id}` — single scan event detail
+- `GET /api/v1/authors/{id}/scan-history` — convenience wrapper scoped to one author
+
+**Pairs with structured logging:** The JSON log line and the DB row carry the same fields (`author_id`, `books_found`, `new_books`, `updated_books`) — logs for operators, DB for querying/dashboards.
+
+### Tasks
+
+- [ ] `db/migrations/` — Alembic migration `0004_scan_events.py`
+- [ ] `db/models.py` — `ScanEvent` ORM model
+- [ ] `core/scan.py` — write `ScanEvent` row at scan start (status=`'in_progress'`) and update on completion/error
+- [ ] `api/v1/scans.py` — 3 new history endpoints
+- [ ] `CHANGELOG.md` — v0.42.0 entry
+- [ ] `VERSION` + `main.py` — bump to `0.42.0`
+
+---
+
+## v0.43.0 — pytest Suite for `core/`
+
+**Status:** Not Started  
+**Goal:** Establish a regression net before any schema-level refactor. Pure functions in `core/normalize.py` and `core/merge.py` are the highest-value targets — they have no I/O and can be tested without infrastructure.
+
+### Coverage targets
+
+| Module | Functions | Notes |
+|---|---|---|
+| `core/normalize.py` | `normalize_name`, `author_names_match`, `_expand_initials` | Many edge cases already documented in comments |
+| `core/merge.py` | `merge_books`, `deduplicate_by_isbn` | Pure data transforms |
+| `core/scan.py` | `_find_existing_book` | Needs async DB fixture; lower priority |
+| `confidence.py` | `score_books`, scoring rules | Existing `test_confidence.py` to be migrated to pytest |
+
+### Fixtures
+
+```python
+# tests/conftest.py
+@pytest.fixture
+async def db_session():
+    """In-memory SQLite (or test PostgreSQL) session for scan.py tests."""
+    ...
+```
+
+### Tasks
+
+- [ ] `pyproject.toml` or `pytest.ini` — pytest config, `asyncio_mode = auto`
+- [ ] `requirements-dev.txt` — `pytest`, `pytest-asyncio`, `pytest-cov`
+- [ ] `tests/conftest.py` — shared fixtures
+- [ ] `tests/test_normalize.py` — port existing edge-case examples from comments + CHANGELOG
+- [ ] `tests/test_merge.py` — merge/dedup logic
+- [ ] `tests/test_confidence.py` — migrate `test_confidence.py` to pytest
+- [ ] GitHub Actions workflow (optional) — `pytest --cov=core` on push
+
+---
+
+## v0.44.0 — Metadata Response Caching with TTL
+
+**Status:** Not Started  
+**Goal:** Cache per-author API responses in the database to avoid redundant upstream calls and reduce exposure to rate limits on OpenLibrary / Google Books / Audible.
+
+### Schema
+
+```sql
+CREATE TABLE metadata_cache (
+    id           SERIAL PRIMARY KEY,
+    cache_key    TEXT NOT NULL UNIQUE,  -- '{provider}:{author_normalized}'
+    provider     TEXT NOT NULL,         -- 'openlibrary' | 'googlebooks' | 'audible' | 'isbndb'
+    author_id    INT REFERENCES authors(id) ON DELETE CASCADE,
+    payload      JSONB NOT NULL,
+    fetched_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at   TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX idx_metadata_cache_key ON metadata_cache(cache_key);
+CREATE INDEX idx_metadata_cache_expires ON metadata_cache(expires_at);
+```
+
+**TTL config:**
+```yaml
+scan:
+  cache_ttl_hours:
+    openlibrary: 24
+    googlebooks: 24
+    audible: 12
+    isbndb: 48
+```
+
+**Lookup flow in `core/metadata.py`:**
+1. Check `metadata_cache` where `cache_key = '{provider}:{author_normalized}'` AND `expires_at > NOW()`
+2. If hit → return cached payload (no upstream call)
+3. If miss → fetch from API, write to `metadata_cache`, return result
+
+**Cache invalidation:**
+- `POST /api/v1/authors/{id}/invalidate-cache` — force-expire all cached entries for an author
+- Automatic expiry via `expires_at`; a periodic cleanup task deletes rows where `expires_at < NOW() - interval '1 day'`
+
+### Tasks
+
+- [ ] `db/migrations/` — Alembic migration `0005_metadata_cache.py`
+- [ ] `db/models.py` — `MetadataCache` ORM model
+- [ ] `core/metadata.py` — wrap each `query_*()` function with cache read/write
+- [ ] `config.py` — `scan.cache_ttl_hours` defaults
+- [ ] `api/v1/authors.py` — `POST /api/v1/authors/{id}/invalidate-cache`
+- [ ] `workers/tasks.py` — `cleanup_expired_cache_task` arq periodic job
+
+---
+
+## v0.45.0 — Webhook Retry + Dead Endpoint Detection
+
+**Status:** Not Started  
+**Goal:** Make webhook delivery reliable. The current implementation fires once and logs failure — no retry, no circuit-breaker.
+
+### Retry strategy
+
+```
+Attempt 1 — immediate
+Attempt 2 — 1 s delay
+Attempt 3 — 5 s delay
+Attempt 4 — 30 s delay
+→ After 4 failures: mark delivery as permanently failed
+```
+
+Implemented as an arq task (not inline in the HTTP handler) so retries survive service restarts.
+
+### Dead endpoint detection
+
+- After **10 consecutive delivery failures** for a webhook, set `webhooks.active = false` and emit a `webhook.disabled` event to the SSE stream
+- `GET /api/v1/webhooks` response includes `consecutive_failures` count and `disabled_at` timestamp
+- `POST /api/v1/webhooks/{id}/re-enable` — reset failure counter and re-activate
+
+### Schema additions
+
+```sql
+ALTER TABLE webhooks ADD COLUMN consecutive_failures INT DEFAULT 0;
+ALTER TABLE webhooks ADD COLUMN disabled_at TIMESTAMPTZ;
+ALTER TABLE webhooks ADD COLUMN last_success_at TIMESTAMPTZ;
+```
+
+### Tasks
+
+- [ ] `db/migrations/` — Alembic migration `0006_webhook_retry_fields.py`
+- [ ] `db/models.py` — add three fields to `Webhook` model
+- [ ] `workers/tasks.py` — `deliver_webhook_task(webhook_id, event_type, payload)` with retry loop
+- [ ] `api/v1/webhooks.py` — update fan-out to enqueue `deliver_webhook_task` instead of inline POST
+- [ ] `api/v1/webhooks.py` — `POST /api/v1/webhooks/{id}/re-enable` endpoint
+- [ ] `core/search.py` (or notifications module) — emit `webhook.disabled` SSE event on auto-disable
+- [ ] `CHANGELOG.md` — v0.45.0 entry
+- [ ] `VERSION` + `main.py` — bump to `0.45.0`
