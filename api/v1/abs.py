@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_config
 from core.audiobookshelf import get_all_authors_from_audiobookshelf
+from core.normalize import author_names_match
 from db.models import Author, Watchlist
 from db.session import get_session
 
@@ -28,15 +29,20 @@ async def import_authors(session: AsyncSession = Depends(get_session)) -> dict:
     async with httpx.AsyncClient() as client:
         author_names = await get_all_authors_from_audiobookshelf(client, abs_url, abs_token)
 
+    # Load all existing author names once so we can fuzzy-match against them.
+    # This prevents "J.N. Chaney" and "JN Chaney" from creating two rows.
+    existing_result = await session.execute(select(Author.name))
+    existing_names: list[str] = [row[0] for row in existing_result.all()]
+
     added = 0
     for name in author_names:
-        existing = await session.execute(select(Author).where(Author.name == name))
-        if existing.scalar_one_or_none():
+        if any(author_names_match(name, ex) for ex in existing_names):
             continue
         author = Author(name=name, name_sort=_sort_name(name))
         session.add(author)
         await session.flush()
         session.add(Watchlist(author_id=author.id))
+        existing_names.append(name)  # guard against two variants in the same batch
         added += 1
 
     await session.commit()

@@ -1,5 +1,26 @@
 # BookScout Changelog
 
+## [0.41.3] - 2026-03-21
+
+> **Smarter ABS import deduplication.**  Author name variants like `"J.N. Chaney"`,
+> `"JN Chaney"`, and `"j.n. chaney"` now collapse into a single watchlist entry.
+> Noise strings (`"others"`, `"various"`, etc.) are filtered out.
+
+### Fixed
+- **`core/audiobookshelf.py` — `get_all_authors_from_audiobookshelf()`** — replaced
+  the raw `set[str]` with a `dict` keyed by `normalize_author_name()`.  When two
+  strings normalise to the same key (e.g. `"J.N. Chaney"` and `"JN Chaney"`), the
+  longer/more-detailed display form is kept.  Added `_NOISE_AUTHORS` denylist
+  that discards `"others"`, `"various"`, `"various authors"`, `"unknown"`,
+  `"unknown author"`, `"multiple authors"`, `"multiple narrators"`, `"narrators"`.
+- **`api/v1/abs.py` — `import_authors()`** — replaced the exact-string
+  `Author.name == name` duplicate check with `author_names_match()` fuzzy
+  comparison against all existing author names loaded in a single query.  Same
+  guard is applied within a single import batch (prevents two name-variants
+  arriving in the same API call from both being inserted).
+
+---
+
 ## [0.41.2] - 2026-03-21
 
 ### Changed

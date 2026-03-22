@@ -8,7 +8,15 @@ import logging
 
 import httpx
 
+from core.normalize import normalize_author_name
+
 logger = logging.getLogger(__name__)
+
+# Author name strings that appear in ABS metadata but are not real authors.
+_NOISE_AUTHORS: frozenset[str] = frozenset({
+    "others", "various", "various authors", "unknown", "unknown author",
+    "multiple authors", "multiple narrators", "narrators",
+})
 
 
 async def check_audiobookshelf(
@@ -87,7 +95,10 @@ async def get_all_authors_from_audiobookshelf(
         return []
 
     headers = {"Authorization": f"Bearer {abs_token}"}
-    authors: set[str] = set()
+    # Map normalized key → best display-name seen so far.  Using a dict lets
+    # us deduplicate "J.N. Chaney", "JN Chaney", "j.n. chaney" etc. into a
+    # single canonical entry while keeping the most informative display name.
+    seen: dict[str, str] = {}  # normalize_author_name(name) → display name
 
     try:
         r = await client.get(f"{abs_url}/api/libraries", headers=headers, timeout=10)
@@ -119,8 +130,16 @@ async def get_all_authors_from_audiobookshelf(
                             raw = raw.replace(sep, "||")
                         for part in raw.split("||"):
                             part = part.strip()
-                            if len(part) > 1:
-                                authors.add(part)
+                            if len(part) <= 1:
+                                continue
+                            if part.lower() in _NOISE_AUTHORS:
+                                continue
+                            key = normalize_author_name(part)
+                            if key not in seen:
+                                seen[key] = part
+                            elif len(part) > len(seen[key]):
+                                # Prefer the more detailed display form
+                                seen[key] = part
 
                 total_processed += len(items)
                 if total_processed >= data.get("total", 0):
@@ -130,4 +149,4 @@ async def get_all_authors_from_audiobookshelf(
     except Exception as exc:
         logger.error("ABS authors fetch failed", extra={"error": str(exc)})
 
-    return sorted(authors)
+    return sorted(seen.values())
