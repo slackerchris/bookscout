@@ -1,5 +1,28 @@
 # BookScout Changelog
 
+## [0.42.1] - 2026-03-23
+
+### Added
+- **Full env-var config** — all download and post-process settings can now
+  be set via environment variables / `.env` file without touching
+  `config.yaml`: `DOWNLOAD_PREFERRED`, `SABNZBD_URL`, `SABNZBD_API_KEY`,
+  `SABNZBD_CATEGORY`, `TORRENT_URL`, `TORRENT_USERNAME`, `TORRENT_PASSWORD`,
+  `TORRENT_CATEGORY`, `TORRENT_SAVE_PATH`, `POSTPROCESS_MODE`,
+  `POSTPROCESS_LIBRARY_ROOT`.
+- **`scripts/qbittorrent-postprocess.sh`** — drop-in post-download hook for
+  qBittorrent.  Reads the `bookscout-{id}` tag stamped by BookScout at grab
+  time, calls `POST /api/v1/books/{id}/import`, and logs the result.
+  Configure via `BOOKSCOUT_URL`, `TRIGGER_CATEGORY`, and `LOG_FILE` env vars.
+- **`book_id` in `DownloadRequest`** — when set, the torrent is submitted to
+  qBittorrent with a `bookscout-{id}` tag enabling automatic post-process
+  correlation.
+
+### Fixed
+- **`docker-compose.yml`** — removed duplicate `volumes:` key under the
+  `bookscout` service.
+
+---
+
 ## [0.42.0] - 2026-03-23
 
 > **Download integration + post-download file organisation.**  Full pipeline
