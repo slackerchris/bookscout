@@ -2,9 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system deps (psycopg2 needs libpq)
+# Install system deps
+# - libpq-dev  : required by psycopg2 (Alembic sync driver)
+# - unrar-free : optional — enables .rar extraction in core/importer.py
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
+    unrar-free \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

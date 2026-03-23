@@ -91,3 +91,68 @@ async def scan_all_library_paths_task(ctx: dict) -> dict[str, Any]:
             errors.append({"library_path_id": pid, "error": str(exc)})
 
     return {"paths_scanned": len(results), "results": results, "errors": errors}
+
+
+async def import_download_task(
+    ctx: dict,
+    book_id: int,
+    source_path: str,
+) -> dict[str, Any]:
+    """arq task: extract and move a downloaded file into the library.
+
+    Reads ``postprocess.library_root`` from config, then calls
+    ``core.importer.import_download()`` to extract archives and arrange
+    audio files into ``<library_root>/<Author>/<Series>/<Title>/``.
+    On success the book record is updated: ``have_it=True``,
+    ``match_method='imported'``.
+    """
+    import asyncio
+    from sqlalchemy import select
+    from db.models import Author, Book, BookAuthor
+    from core.importer import import_download
+
+    config = get_config()
+    pp = getattr(config, "postprocess", None)
+    library_root = getattr(pp, "library_root", "") if pp else ""
+    if not library_root:
+        return {"success": False, "detail": "postprocess.library_root not configured"}
+
+    async with AsyncSessionFactory() as session:
+        book_result = await session.execute(select(Book).where(Book.id == book_id))
+        book = book_result.scalar_one_or_none()
+        if book is None:
+            return {"success": False, "detail": f"Book {book_id} not found"}
+
+        author_result = await session.execute(
+            select(Author.name)
+            .join(BookAuthor, Author.id == BookAuthor.author_id)
+            .where(BookAuthor.book_id == book_id, BookAuthor.role == "author")
+            .limit(1)
+        )
+        author_name = author_result.scalar_one_or_none() or ""
+        title = book.title or ""
+        series = book.series or None
+
+    # Run the blocking filesystem work in a thread pool
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: import_download(
+            source=source_path,
+            library_root=library_root,
+            author=author_name,
+            title=title,
+            series=series,
+        ),
+    )
+
+    if result.get("files_moved", 0) > 0:
+        async with AsyncSessionFactory() as session:
+            book_result = await session.execute(select(Book).where(Book.id == book_id))
+            book = book_result.scalar_one_or_none()
+            if book is not None:
+                book.have_it = True
+                book.match_method = "imported"
+                await session.commit()
+
+    return {"success": True, "book_id": book_id, **result}

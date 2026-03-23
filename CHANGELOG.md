@@ -1,5 +1,57 @@
 # BookScout Changelog
 
+## [0.42.0] - 2026-03-23
+
+> **Download integration + post-download file organisation.**  Full pipeline
+> from indexer search through download client submission to automatic
+> extraction and library organisation.
+
+### Added
+- **`POST /api/v1/books/{id}/search`** — auto-constructs an indexer search
+  query from the book's title and primary author name, queries all configured
+  Prowlarr / Jackett indexers, and returns annotated results with
+  `size_human` field.
+- **`GET /api/v1/search/status`** — pings all configured indexers and the
+  active download client in parallel; returns connectivity and version info
+  for each service.
+- **`GET /api/v1/search/download/queue`** — proxies the live download queue
+  from the configured download client (SABnzbd, qBittorrent, or Transmission)
+  with per-item progress, ETA, and save path.
+- **`POST /api/v1/books/{id}/import`** — enqueues an `import_download_task`
+  that extracts archives and moves audio files into
+  `<library_root>/<Author>/<Series>/<Title>/`.  Requires
+  `postprocess.mode: bookscout` and a configured `postprocess.library_root`.
+- **`core/importer.py`** — post-download file organiser: handles zip / rar /
+  7z extraction (optional `rarfile` + `py7zr` deps), collects audio files
+  (`.m4b .mp3 .flac .opus .aac .ogg .wma .m4a`), sanitises path components,
+  builds the `author/series/title` destination tree, moves files, and cleans
+  up temporary work directories.
+- **`import_download_task`** (`workers/tasks.py`) — arq background task that
+  reads book metadata from the DB, runs the importer in a thread pool, and
+  marks `book.have_it = True` / `book.match_method = "imported"` on success.
+  Registered in `WorkerSettings.functions`.
+- **`postprocess` config section** — new top-level key with two fields:
+  `mode` (`"client"` default | `"bookscout"`) and `library_root` (absolute
+  path to the root audiobook library).
+
+### Changed
+- **`send_to_sabnzbd()` / `send_to_torrent_client()`** — return a rich `dict`
+  (`success`, `nzo_id` / `hash`, `detail` on failure) instead of a bare
+  `bool`; callers now surface the client reference to the API response.
+- **`POST /api/v1/search/download`** — response now includes `nzo_id` (NZB)
+  or `hash` (torrent) from the download client.
+- **Download clients** — `category` and `save_path` parameters added to all
+  three send functions (SABnzbd `cat=`, qBittorrent `category`/`savepath`,
+  Transmission `download-dir`).  Config gains `default_category` (SABnzbd +
+  torrent) and `save_path` (torrent) with per-request override support.
+
+### Fixed
+- **`GET /api/v1/events` SSE heartbeat** — was firing every ~1 s due to a
+  missing time-gate; now fires exactly every 30 s using a timestamp
+  comparison.
+
+---
+
 ## [0.41.4] - 2026-03-22
 
 ### Fixed

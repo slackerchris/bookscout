@@ -123,7 +123,7 @@ GET   /events                # SSE stream — confirm heartbeat
 
 ## v0.41.0 — Cross-Watchlist Dedup + Co-Author Discovery
 
-**Status:** Not Started  
+**Status:** Done  
 **Goal:** Eliminate duplicate book rows when co-authors share books across watchlist scans, and expose co-author discovery so users can grow their watchlist organically.
 
 ### Problem 1 — Cross-Watchlist Duplicate Books

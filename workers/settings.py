@@ -13,6 +13,7 @@ from arq import cron as arq_cron
 from arq.connections import RedisSettings
 
 from workers.tasks import (
+    import_download_task,
     scan_all_authors_task,
     scan_all_library_paths_task,
     scan_author_task,
@@ -97,7 +98,7 @@ async def on_shutdown(ctx: dict) -> None:
 
 
 class WorkerSettings:
-    functions = [scan_author_task, scan_all_authors_task, scan_library_path_task, scan_all_library_paths_task]
+    functions = [scan_author_task, scan_all_authors_task, scan_library_path_task, scan_all_library_paths_task, import_download_task]
     cron_jobs = _build_cron_jobs()
     redis_settings = _redis_settings()
     on_startup = staticmethod(on_startup)

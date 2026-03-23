@@ -40,6 +40,8 @@ async def _generate(request: Request) -> AsyncGenerator[str, None]:
     pubsub = redis.pubsub()
     await pubsub.subscribe("bookscout:events")
 
+    last_heartbeat = asyncio.get_event_loop().time()
+
     try:
         while True:
             # Client disconnect detection
@@ -54,8 +56,10 @@ async def _generate(request: Request) -> AsyncGenerator[str, None]:
                 text = raw.decode() if isinstance(raw, bytes) else raw
                 yield f"data: {text}\n\n"
             else:
-                # Heartbeat every ~30 s (manager handles timing externally)
-                yield ": heartbeat\n\n"
+                now = asyncio.get_event_loop().time()
+                if now - last_heartbeat >= 30:
+                    yield ": heartbeat\n\n"
+                    last_heartbeat = now
 
             await asyncio.sleep(1)
     finally:

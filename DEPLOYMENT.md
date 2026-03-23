@@ -89,7 +89,7 @@ bookscout  | [bookscout] started — API docs at /docs
 ```bash
 # Health probe
 curl http://localhost:8765/health
-# {"status":"ok","version":"0.40.0"}
+# {"status":"ok","version":"0.41.4"}
 
 # Open interactive docs
 open http://localhost:8765/docs

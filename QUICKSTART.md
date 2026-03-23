@@ -20,13 +20,15 @@ at **http://localhost:8765/docs** once the service is running.
 cp config.yaml.example config.yaml   # edit as needed (see below)
 
 # 2. Start everything
-docker-compose up -d
+docker compose up -d
 ```
 
-Three containers start:
+Five containers start:
 - **bookscout** — FastAPI service on port **8765**
 - **postgres** — PostgreSQL database
 - **redis** — Redis instance (job queue + event bus)
+- **bookscout-migrate** — runs `alembic upgrade head` once, then exits
+- **bookscout-worker** — arq background worker (scans, webhooks)
 
 API: **http://localhost:8765**  
 Interactive docs: **http://localhost:8765/docs**
@@ -67,7 +69,7 @@ curl http://localhost:8765/health
 #  "components":{"database":"ok","redis":"ok"}}
 ```
 
-If `status` is `"degraded"` check `docker-compose logs` for the failing component.
+If `status` is `"degraded"` check `docker compose logs` for the failing component.
 
 ### 2. Add an author to your watchlist
 
@@ -81,7 +83,7 @@ curl -X POST http://localhost:8765/api/v1/authors/ \
 ### 3. Trigger a scan
 
 ```bash
-curl -X POST http://localhost:8765/api/v1/scans/1
+curl -X POST http://localhost:8765/api/v1/scans/author/1
 # {"job_id": "abc123", "status": "queued"}
 ```
 
@@ -126,19 +128,19 @@ curl -X POST http://localhost:8765/api/v1/scans/all
 
 ```bash
 # View logs
-docker-compose logs -f bookscout
-docker-compose logs -f worker
+docker compose logs -f bookscout
+docker compose logs -f worker
 
 # Stop everything
-docker-compose down
+docker compose down
 
 # Restart after config.yaml change
-docker-compose restart bookscout
+docker compose restart bookscout
 
 # Rebuild after a code update
-docker-compose down
-docker-compose build
-docker-compose up -d
+docker compose down
+docker compose build
+docker compose up -d
 ```
 
 ---
@@ -146,10 +148,10 @@ docker-compose up -d
 ## Troubleshooting
 
 **`"status": "degraded"` in /health**  
-→ Check `docker-compose logs postgres` and `docker-compose logs redis`.
+→ Check `docker compose logs postgres` and `docker compose logs redis`.
 
 **Scan queued but books never appear**  
-→ The arq worker may be down.  Check `docker-compose logs worker`.
+→ The arq worker may be down.  Check `docker compose logs worker`.
 
 **`have_it` is always false**  
 → Verify `audiobookshelf.url` and `audiobookshelf.token` in `config.yaml`.

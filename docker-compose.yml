@@ -30,10 +30,17 @@ services:
       - AUDIOBOOKSHELF_TOKEN=${AUDIOBOOKSHELF_TOKEN:-}
       - PROWLARR_URL=${PROWLARR_URL:-}
       - PROWLARR_API_KEY=${PROWLARR_API_KEY:-}
+      - JACKETT_URL=${JACKETT_URL:-}
+      - JACKETT_API_KEY=${JACKETT_API_KEY:-}
       - GOOGLE_BOOKS_API_KEY=${GOOGLE_BOOKS_API_KEY:-}
       - ISBNDB_API_KEY=${ISBNDB_API_KEY:-}
       - SECRET_KEY=${SECRET_KEY:-bookscout-secret-key-change-in-production}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - bookscout-data:/data
+      # Uncomment and adjust if using postprocess.mode: bookscout
+      # The path must match postprocess.library_root in config.yaml
+      #- /path/to/audiobooks:/audiobooks
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -52,6 +59,8 @@ services:
     command: ["arq", "workers.settings.WorkerSettings"]
     volumes:
       - bookscout-data:/data
+      # Uncomment and adjust if using postprocess.mode: bookscout
+      #- /path/to/audiobooks:/audiobooks
     environment:
       - DATABASE_URL=postgresql+asyncpg://bookscout:${POSTGRES_PASSWORD:-bookscout}@postgres/bookscout
       - REDIS_URL=redis://redis:6379
@@ -60,6 +69,8 @@ services:
       - AUDIOBOOKSHELF_TOKEN=${AUDIOBOOKSHELF_TOKEN:-}
       - PROWLARR_URL=${PROWLARR_URL:-}
       - PROWLARR_API_KEY=${PROWLARR_API_KEY:-}
+      - JACKETT_URL=${JACKETT_URL:-}
+      - JACKETT_API_KEY=${JACKETT_API_KEY:-}
       - GOOGLE_BOOKS_API_KEY=${GOOGLE_BOOKS_API_KEY:-}
       - ISBNDB_API_KEY=${ISBNDB_API_KEY:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}

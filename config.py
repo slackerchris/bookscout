@@ -30,12 +30,14 @@ _DEFAULT: dict = {
     "apis": {"google_books_key": "", "isbndb_key": ""},
     "download": {
         "preferred": "",
-        "sabnzbd": {"url": "", "api_key": ""},
+        "sabnzbd": {"url": "", "api_key": "", "default_category": ""},
         "torrent": {
             "type": "qbittorrent",
             "url": "",
             "username": "",
             "password": "",
+            "default_category": "",
+            "save_path": "",
         },
     },
     "scan": {
@@ -54,6 +56,12 @@ _DEFAULT: dict = {
         "host": "0.0.0.0",
         "port": 8000,
         "secret_key": "bookscout-secret-key-change-in-production",
+    },
+    "postprocess": {
+        # "bookscout" = BookScout extracts and moves files into author/series/book layout
+        # "client"    = download client is responsible (e.g. via its own post-processing scripts)
+        "mode": "client",
+        "library_root": "",  # required when mode = "bookscout"
     },
 }
 

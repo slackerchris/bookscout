@@ -12,7 +12,7 @@ There is **no web UI** — interaction is entirely through the REST API. Interac
 - **Filesystem scanner** — watches local library paths and cross-references files against catalog results
 - **Audiobookshelf integration** — marks books owned vs. missing against your ABS library
 - **Prowlarr / Jackett search** — one-call API to open a search for any missing book
-- **Webhooks + SSE** — push `book.missing`, `scan.complete`, and custom events to n8n, Discord, Mafl, etc.
+- **Webhooks + SSE** — push `scan.complete`, `coauthor.discovered`, and custom events to n8n, Discord, Mafl, etc.
 - **Scheduled scans** — cron-driven background worker (arq + Redis) rescans watchlist authors automatically
 
 ## Why BookScout?
@@ -117,11 +117,15 @@ All YAML keys can be overridden with environment variables: `DATABASE_URL`, `RED
 | `GET` | `/api/v1/authors` | List watchlist authors |
 | `POST` | `/api/v1/authors` | Add author to watchlist |
 | `DELETE` | `/api/v1/authors/{id}` | Remove author |
+| `GET` | `/api/v1/authors/{id}/coauthors` | Co-authors discovered for an author |
 | `GET` | `/api/v1/books` | List books (filterable by author, confidence, owned) |
 | `PATCH` | `/api/v1/books/{id}` | Update book metadata |
+| `POST` | `/api/v1/books/{id}/search` | Search indexers for a specific book |
 | `POST` | `/api/v1/scans/author/{id}` | Enqueue scan for one author |
 | `POST` | `/api/v1/scans/all` | Enqueue scan for all watchlist authors |
-| `GET` | `/api/v1/search` | Unified search across authors + books |
+| `POST` | `/api/v1/search` | Search Prowlarr + Jackett indexers |
+| `POST` | `/api/v1/search/download` | Send an indexer result to your download client |
+| `GET` | `/api/v1/search/status` | Check indexer and download client connectivity |
 | `GET` | `/api/v1/library-paths` | List filesystem library paths |
 | `POST` | `/api/v1/library-paths` | Register a new library path |
 | `POST` | `/api/v1/library-paths/{id}/scan` | Trigger filesystem scan |
@@ -144,7 +148,7 @@ Audiobookshelf ──────► BookScout API
 ```
 
 - Register library paths so BookScout can cross-reference your actual files
-- Webhooks fire on `book.missing`, `book.found`, `scan.complete`
+- Webhooks fire on `scan.complete`, `coauthor.discovered`
 - SSE feed (`/api/v1/events`) streams real-time scan progress
 
 ## Updating
