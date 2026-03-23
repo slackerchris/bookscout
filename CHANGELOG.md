@@ -147,7 +147,7 @@
 
 ---
 
-## [0.41.0] - 2026-07-13
+## [0.41.0] - 2026-03-21
 
 > **Cross-watchlist deduplication + co-author discovery + scheduled scanning.**
 > Books shared by multiple watched authors are now stored as a single canonical
@@ -194,7 +194,7 @@
   author-scoped filter that prevented recognition of books already in the
   database under a different primary author.
 
-## [0.40.0] - 2026-03-21
+## [0.40.0] - 2026-03-17
 
 > **Stable service release.**  Production-ready FastAPI headless service with
 > full Audible catalog coverage, per-source toggle flags, co-author re-scan fix,
@@ -236,7 +236,7 @@
 
 ---
 
-## [0.37.0] - 2026-03-21
+## [0.37.0] - 2026-03-14
 
 > **Filesystem scanner + library path management.**  BookScout can now detect
 > owned audiobooks directly from local library directories, without requiring
@@ -274,7 +274,7 @@
 
 ---
 
-## [0.32.1] - 2026-03-21
+## [0.32.1] - 2026-03-12
 
 ### Fixed
 - **Audnexus API broken** (`core/metadata.py`): The `/search?name=` endpoint returns
@@ -291,7 +291,7 @@
 
 ---
 
-## [0.32.2] - 2026-03-21
+## [0.32.2] - 2026-03-10
 
 ### Fixed
 - **`author_names_match()` missed spaced-initial variants** (`core/normalize.py`):
@@ -305,7 +305,7 @@
 
 ---
 
-## [0.32.0] - 2026-03-21
+## [0.32.0] - 2026-03-08
 
 ### Added
 - **FastAPI service** (`main.py`): replaces Flask (`app.py` deleted)
@@ -361,7 +361,7 @@
 
 ---
 
-## [0.31.0] - 2026-03-21
+## [0.31.0] - 2026-02-24
 
 ### Added
 - **PostgreSQL support**: Full async schema via SQLAlchemy 2.0 + asyncpg
@@ -391,7 +391,7 @@
 
 ---
 
-## [0.30.0] - 2026-03-21
+## [0.30.0] - 2026-02-21
 
 ### Added
 - **Confidence Scoring Engine** (`confidence.py`): Scores merged book results to surface the most reliable matches
@@ -436,7 +436,7 @@
 
 ---
 
-## [2.9.3] - 2025-11-05
+## [2.9.3] - 2025-11-01
 
 ### Added
 - **Co-Author Support**: Track and display multiple authors per book
@@ -449,7 +449,7 @@
 
 ---
 
-## [2.9.2] - 2025-11-05
+## [2.9.2] - 2025-10-31
 
 ### Added
 - **Premium API Support**: Optional paid API keys in settings
@@ -478,7 +478,7 @@
 
 ---
 
-## [2.9.1] - 2025-11-05
+## [2.9.1] - 2025-10-29
 
 ### Fixed
 - **Soft Delete System**: Prevent merged/deleted books from re-appearing during rescans
@@ -493,7 +493,7 @@
 
 ---
 
-## [2.9.0] - 2025-11-05
+## [2.9.0] - 2025-10-22
 
 ### Added
 - **Manual Book Management**: Complete suite of manual book editing features
@@ -522,7 +522,7 @@
 
 ---
 
-## [2.4.0] - 2025-11-03
+## [2.4.0] - 2025-10-22
 
 ### Fixed
 - **CRITICAL:** Pagination finally works correctly!
@@ -537,7 +537,7 @@
 
 ---
 
-## [2.3.1] - 2025-11-03
+## [2.3.1] - 2025-10-20
 
 ### Fixed
 - **CRITICAL:** Bulk import now properly splits multi-author books
@@ -549,7 +549,7 @@
 
 ---
 
-## [2.3.0] - 2025-11-03
+## [2.3.0] - 2025-10-20
 
 ### Added
 - **Edit Author Names** - Click pencil icon to fix import errors or spelling
@@ -560,7 +560,7 @@
 
 ---
 
-## [2.2.0] - 2025-11-03
+## [2.2.0] - 2025-10-19
 
 ### Added
 - **Statistics Dashboard** on home page showing:
@@ -570,14 +570,14 @@
 
 ---
 
-## [2.1.1] - 2025-11-03
+## [2.1.1] - 2025-10-19
 
 ### Fixed
 - Footer now properly supports dark mode (text readable in both themes)
 
 ---
 
-## [2.1.0] - 2025-11-03
+## [2.1.0] - 2025-10-18
 
 ### Fixed
 - **CRITICAL:** Bulk import from Audiobookshelf now works correctly
@@ -594,7 +594,7 @@
 
 ---
 
-## [2.0.0] - 2025-11-03
+## [2.0.0] - 2025-10-16
 
 ### Added
 - **Bulk Import from Audiobookshelf** - Import all authors from your library at once
@@ -613,7 +613,7 @@
 
 ---
 
-## [1.0.0] - 2025-11-03
+## [1.0.0] - 2025-10-14
 
 ### Initial Release
 - Multi-source book discovery (Open Library, Google Books, Audnexus)
