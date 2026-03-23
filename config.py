@@ -108,6 +108,28 @@ def _apply_env_overrides(data: dict) -> dict:
         data["server"]["secret_key"] = v
     if v := env.get("PORT"):
         data["server"]["port"] = int(v)
+    if v := env.get("DOWNLOAD_PREFERRED"):
+        data["download"]["preferred"] = v
+    if v := env.get("SABNZBD_URL"):
+        data["download"]["sabnzbd"]["url"] = v
+    if v := env.get("SABNZBD_API_KEY"):
+        data["download"]["sabnzbd"]["api_key"] = v
+    if v := env.get("SABNZBD_CATEGORY"):
+        data["download"]["sabnzbd"]["default_category"] = v
+    if v := env.get("TORRENT_URL"):
+        data["download"]["torrent"]["url"] = v
+    if v := env.get("TORRENT_USERNAME"):
+        data["download"]["torrent"]["username"] = v
+    if v := env.get("TORRENT_PASSWORD"):
+        data["download"]["torrent"]["password"] = v
+    if v := env.get("TORRENT_CATEGORY"):
+        data["download"]["torrent"]["default_category"] = v
+    if v := env.get("TORRENT_SAVE_PATH"):
+        data["download"]["torrent"]["save_path"] = v
+    if v := env.get("POSTPROCESS_MODE"):
+        data["postprocess"]["mode"] = v
+    if v := env.get("POSTPROCESS_LIBRARY_ROOT"):
+        data["postprocess"]["library_root"] = v
 
     return data
 

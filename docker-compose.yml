@@ -21,6 +21,9 @@ services:
       - "8765:8765"
     volumes:
       - bookscout-data:/data
+      # Uncomment and adjust if using postprocess.mode: bookscout
+      # The path must match POSTPROCESS_LIBRARY_ROOT / postprocess.library_root
+      #- /path/to/audiobooks:/audiobooks
     environment:
       - DATABASE_URL=postgresql+asyncpg://bookscout:${POSTGRES_PASSWORD:-bookscout}@postgres/bookscout
       - REDIS_URL=redis://redis:6379
@@ -34,13 +37,20 @@ services:
       - JACKETT_API_KEY=${JACKETT_API_KEY:-}
       - GOOGLE_BOOKS_API_KEY=${GOOGLE_BOOKS_API_KEY:-}
       - ISBNDB_API_KEY=${ISBNDB_API_KEY:-}
-      - SECRET_KEY=${SECRET_KEY:-bookscout-secret-key-change-in-production}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    volumes:
-      - bookscout-data:/data
-      # Uncomment and adjust if using postprocess.mode: bookscout
-      # The path must match postprocess.library_root in config.yaml
-      #- /path/to/audiobooks:/audiobooks
+      # Download client
+      - DOWNLOAD_PREFERRED=${DOWNLOAD_PREFERRED:-}
+      - SABNZBD_URL=${SABNZBD_URL:-}
+      - SABNZBD_API_KEY=${SABNZBD_API_KEY:-}
+      - SABNZBD_CATEGORY=${SABNZBD_CATEGORY:-}
+      - TORRENT_URL=${TORRENT_URL:-}
+      - TORRENT_USERNAME=${TORRENT_USERNAME:-}
+      - TORRENT_PASSWORD=${TORRENT_PASSWORD:-}
+      - TORRENT_CATEGORY=${TORRENT_CATEGORY:-}
+      - TORRENT_SAVE_PATH=${TORRENT_SAVE_PATH:-}
+      # Post-processing
+      - POSTPROCESS_MODE=${POSTPROCESS_MODE:-client}
+      - POSTPROCESS_LIBRARY_ROOT=${POSTPROCESS_LIBRARY_ROOT:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -74,6 +84,17 @@ services:
       - GOOGLE_BOOKS_API_KEY=${GOOGLE_BOOKS_API_KEY:-}
       - ISBNDB_API_KEY=${ISBNDB_API_KEY:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DOWNLOAD_PREFERRED=${DOWNLOAD_PREFERRED:-}
+      - SABNZBD_URL=${SABNZBD_URL:-}
+      - SABNZBD_API_KEY=${SABNZBD_API_KEY:-}
+      - SABNZBD_CATEGORY=${SABNZBD_CATEGORY:-}
+      - TORRENT_URL=${TORRENT_URL:-}
+      - TORRENT_USERNAME=${TORRENT_USERNAME:-}
+      - TORRENT_PASSWORD=${TORRENT_PASSWORD:-}
+      - TORRENT_CATEGORY=${TORRENT_CATEGORY:-}
+      - TORRENT_SAVE_PATH=${TORRENT_SAVE_PATH:-}
+      - POSTPROCESS_MODE=${POSTPROCESS_MODE:-client}
+      - POSTPROCESS_LIBRARY_ROOT=${POSTPROCESS_LIBRARY_ROOT:-}
     depends_on:
       migrate:
         condition: service_completed_successfully

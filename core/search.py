@@ -178,6 +178,7 @@ async def send_to_torrent_client(
     password: str = "",
     category: str = "",
     save_path: str = "",
+    book_id: int = 0,
 ) -> dict[str, Any]:
     """Route to the configured torrent client.
 
@@ -186,6 +187,9 @@ async def send_to_torrent_client(
     *save_path* — explicit download directory.  Supported by both
     qBittorrent (``savepath``) and Transmission (``download-dir``).
     When both are provided for qBittorrent, *save_path* takes precedence.
+    *book_id* — when non-zero, qBittorrent torrents are tagged with
+    ``bookscout-{book_id}`` so the post-process script can call back to
+    the correct import endpoint.
 
     Returns ``{"success": True, "hash": "..."}`` where available (Transmission
     always returns a hash; qBittorrent does not expose one on add), or
@@ -194,7 +198,7 @@ async def send_to_torrent_client(
     if client_type == "qbittorrent":
         return await _send_qbittorrent(
             client, download_url, client_url, username, password,
-            category=category, save_path=save_path,
+            category=category, save_path=save_path, book_id=book_id,
         )
     if client_type == "transmission":
         return await _send_transmission(
@@ -213,6 +217,7 @@ async def _send_qbittorrent(
     password: str,
     category: str = "",
     save_path: str = "",
+    book_id: int = 0,
 ) -> dict[str, Any]:
     try:
         lr = await client.post(
@@ -227,6 +232,8 @@ async def _send_qbittorrent(
             payload["savepath"] = save_path
         elif category:
             payload["category"] = category
+        if book_id:
+            payload["tags"] = f"bookscout-{book_id}"
         r = await client.post(
             f"{qbt_url}/api/v2/torrents/add",
             data=payload,

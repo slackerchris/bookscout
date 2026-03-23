@@ -34,6 +34,7 @@ class DownloadRequest(BaseModel):
     type: str = "torrent"          # "nzb" | "torrent"
     category: str = ""             # SABnzbd: category name; qBittorrent: label/category
     save_path: str = ""            # Explicit destination directory (all clients)
+    book_id: int = 0               # When set, qBittorrent torrents are tagged bookscout-{id}
 
 
 @router.post("/", summary="Unified Prowlarr + Jackett search")
@@ -94,6 +95,7 @@ async def download(body: DownloadRequest) -> dict:
                 password=getattr(torrent, "password", "") if torrent else "",
                 category=body.category or getattr(torrent, "default_category", "") if torrent else body.category,
                 save_path=body.save_path or getattr(torrent, "save_path", "") if torrent else body.save_path,
+                book_id=body.book_id,
             )
 
     if not result.get("success"):
