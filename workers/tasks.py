@@ -131,7 +131,7 @@ async def import_download_task(
         )
         author_name = author_result.scalar_one_or_none() or ""
         title = book.title or ""
-        series = book.series or None
+        series = book.series_name or None
 
     # Run the blocking filesystem work in a thread pool
     loop = asyncio.get_event_loop()
@@ -146,7 +146,7 @@ async def import_download_task(
         ),
     )
 
-    if result.get("files_moved", 0) > 0:
+    if result.get("files_moved"):
         async with AsyncSessionFactory() as session:
             book_result = await session.execute(select(Book).where(Book.id == book_id))
             book = book_result.scalar_one_or_none()

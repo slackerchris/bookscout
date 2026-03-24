@@ -1,5 +1,39 @@
 # BookScout Changelog
 
+## [0.42.3] - 2026-03-23
+
+### Changed
+- **`core/normalize.py`** — added `sort_name()` and `sort_title()` as public
+  helpers.  All three previous private copies (`_sort_name` in
+  `core/scan.py`, `api/v1/authors.py`, `api/v1/abs.py`; `_sort_title` in
+  `core/scan.py`) are removed and replaced with imports from this single
+  source of truth.
+
+### Fixed
+- **`core/scan.py` — `_find_existing_book()`** — Phase 1 identifier queries
+  now include `Book.deleted.is_(False)`.  Previously a soft-deleted row
+  could be found by isbn/asin, the scan would skip re-inserting it (the
+  `existing.deleted` guard), and the book would silently vanish from scan
+  results.  Deleted books are now invisible to Phase 1 so a fresh row is
+  created as expected.
+
+---
+
+## [0.42.2] - 2026-03-23
+
+### Fixed
+- **`workers/tasks.py` — `import_download_task()`** — `book.series` attribute
+  reference corrected to `book.series_name` (the actual model field).  The
+  previous code would raise `AttributeError` at runtime any time an import was
+  triggered for a book with series metadata.
+- **`workers/tasks.py` — `import_download_task()`** — `files_moved` success
+  check changed from `result.get("files_moved", 0) > 0` to
+  `result.get("files_moved")`.  `files_moved` is a `list[str]`, not an int;
+  comparing a list with `> 0` raises `TypeError` in Python — the truthiness
+  check is both correct and simpler.
+
+---
+
 ## [0.42.1] - 2026-03-23
 
 ### Added

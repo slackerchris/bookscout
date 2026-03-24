@@ -61,7 +61,7 @@ app = FastAPI(
         "checks your Audiobookshelf library for ownership; "
         "delivers notifications via SSE and webhooks."
     ),
-    version="0.42.1",
+    version="0.42.3",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",

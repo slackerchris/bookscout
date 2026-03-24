@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_config
 from core.audiobookshelf import get_all_authors_from_audiobookshelf
-from core.normalize import author_names_match
+from core.normalize import author_names_match, sort_name
 from db.models import Author, Watchlist
 from db.session import get_session
 
@@ -38,7 +38,7 @@ async def import_authors(session: AsyncSession = Depends(get_session)) -> dict:
     for name in author_names:
         if any(author_names_match(name, ex) for ex in existing_names):
             continue
-        author = Author(name=name, name_sort=_sort_name(name))
+        author = Author(name=name, name_sort=sort_name(name))
         session.add(author)
         await session.flush()
         session.add(Watchlist(author_id=author.id))
@@ -53,6 +53,4 @@ async def import_authors(session: AsyncSession = Depends(get_session)) -> dict:
     }
 
 
-def _sort_name(name: str) -> str:
-    parts = name.strip().rsplit(" ", 1)
-    return f"{parts[1]}, {parts[0]}" if len(parts) == 2 else name
+

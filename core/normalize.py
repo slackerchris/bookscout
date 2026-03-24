@@ -110,3 +110,17 @@ def extract_series_from_title(title: str) -> tuple[str, str | None, str | None]:
             return clean, series, position
 
     return title, None, None
+
+
+def sort_name(name: str) -> str:
+    """Return a sort-friendly ``"Last, First"`` form of *name*."""
+    parts = name.strip().rsplit(" ", 1)
+    return f"{parts[1]}, {parts[0]}" if len(parts) == 2 else name
+
+
+def sort_title(title: str) -> str:
+    """Strip leading articles for alphabetic sorting."""
+    for article in ("The ", "A ", "An "):
+        if title.startswith(article):
+            return title[len(article):] + ", " + article.strip()
+    return title

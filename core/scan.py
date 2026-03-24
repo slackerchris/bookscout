@@ -35,7 +35,7 @@ from core.metadata import (
     query_openlibrary,
     search_audible_metadata_direct,
 )
-from core.normalize import author_names_match
+from core.normalize import author_names_match, sort_name, sort_title
 from db.models import Author, Book, BookAuthor, Watchlist
 
 logger = logging.getLogger(__name__)
@@ -151,7 +151,7 @@ async def scan_author_by_id(
         if not existing:
             new_book = Book(
                 title=book["title"],
-                title_sort=_sort_title(book["title"]),
+                title_sort=sort_title(book["title"]),
                 subtitle=book.get("subtitle"),
                 isbn=book.get("isbn"),
                 isbn13=book.get("isbn13"),
@@ -360,14 +360,16 @@ async def _find_existing_book(
     contributor.  The calling code is responsible for adding that link and
     removing any stale ``role='co-author'`` row for the same person.
     """
-    # Phase 1: global identifier lookup — no author filter
+    # Phase 1: global identifier lookup — no author filter; skip soft-deleted rows
     for field, value in (
         (Book.isbn13, book.get("isbn13")),
         (Book.isbn, book.get("isbn")),
         (Book.asin, book.get("asin")),
     ):
         if value:
-            q = await session.execute(select(Book).where(field == value))
+            q = await session.execute(
+                select(Book).where(field == value, Book.deleted.is_(False))
+            )
             found = q.scalar_one_or_none()
             if found:
                 link_q = await session.execute(
@@ -401,22 +403,10 @@ async def _get_or_create_author(session: AsyncSession, name: str) -> Author:
     result = await session.execute(select(Author).where(Author.name == name))
     author = result.scalar_one_or_none()
     if not author:
-        author = Author(name=name, name_sort=_sort_name(name))
+        author = Author(name=name, name_sort=sort_name(name))
         session.add(author)
         await session.flush()
     return author
-
-
-def _sort_title(title: str) -> str:
-    for article in ("The ", "A ", "An "):
-        if title.startswith(article):
-            return title[len(article):] + ", " + article.strip()
-    return title
-
-
-def _sort_name(name: str) -> str:
-    parts = name.strip().rsplit(" ", 1)
-    return f"{parts[1]}, {parts[0]}" if len(parts) == 2 else name
 
 
 def _parse_year(release_date: Any) -> int | None:

@@ -72,10 +72,132 @@
 | 0.39.0 | *(collapsed into v0.32.0)* | — |
 | 0.40.0 | Stable service release | ✅ Done |
 | 0.41.0 | Cross-watchlist dedup + co-author discovery + structured logging | ✅ Done |
-| 0.42.0 | Author identity resolution (`author_aliases`) + scan metrics (`scan_events`) | 🔜 Next |
-| 0.43.0 | pytest suite for `core/` | 📋 Planned |
-| 0.44.0 | Metadata response caching with TTL | 📋 Planned |
-| 0.45.0 | Webhook retry with exponential backoff + dead endpoint detection | 📋 Planned |
+| 0.42.0 | Download integration + post-download file organisation | ✅ Done |
+| 0.42.1 | Full env-var config + qBittorrent post-process hook | ✅ Done |
+| 0.42.2 | Hotfix: `book.series_name` + `files_moved` type check in importer task | ✅ Done |
+| 0.43.0 | Data integrity hardening + scan performance + code hygiene | 🔜 Next |
+| 0.44.0 | Author identity resolution (`author_aliases`) + scan metrics | 📋 Planned |
+| 0.45.0 | Metadata response caching with TTL | 📋 Planned |
+| 0.46.0 | pytest suite for `core/` + promoted smoke tests | 📋 Planned |
+| 0.47.0 | Webhook retry with exponential backoff + dead endpoint detection | 📋 Planned |
+
+---
+
+## v0.43.0 — Data Integrity Hardening + Scan Performance
+
+**Status:** Next  
+**Goal:** Close the data integrity gaps uncovered by code review, speed up
+prolific-author scans, and consolidate duplicated helper code before the test
+suite lands.
+
+### `_find_existing_book` — filter deleted books in Phase 1
+
+**File:** `core/scan.py`  
+**Problem:** The Phase 1 global identifier lookup (`isbn13 → isbn → asin`) has
+no `deleted.is_(False)` guard.  A soft-deleted book can match, the scan skips
+re-inserting it (the `existing and existing.deleted` guard returns `continue`),
+and the title is silently absent from scan results.  
+**Fix:** Add `.where(Book.deleted.is_(False))` to each Phase 1 query, or log a
+`logger.warning("skipping soft-deleted book %s", found.id)` at minimum so the
+gap is visible in structured logs.
+
+```python
+# Phase 1 query — add deleted filter
+q = await session.execute(
+    select(Book).where(field == value, Book.deleted.is_(False))
+)
+```
+
+### `check_audiobookshelf` — semaphore-bounded concurrency
+
+**File:** `core/scan.py` (scan loop)  
+**Problem:** ABS ownership checks are serialised one-per-book to respect rate
+limits.  For a prolific author (200+ books) this is 200+ sequential HTTP
+round-trips; scan wall time is dominated by network latency.  
+**Fix:** Replace the serial loop with `asyncio.gather` gated by an
+`asyncio.Semaphore(4)`:
+
+```python
+sem = asyncio.Semaphore(4)
+
+async def _check_one(book_obj):
+    async with sem:
+        return await check_audiobookshelf(book_obj, abs_url, abs_token, http_client)
+
+abs_results = await asyncio.gather(*(_check_one(b) for b in books_to_check))
+```
+
+Target concurrency of 3–5 strikes a safe balance between throughput and ABS
+server load.
+
+### Extract `_sort_name` / `_sort_title` to `core/normalize.py`
+
+**Problem:** `_sort_name` is identical in `core/scan.py`, `api/v1/authors.py`,
+and `api/v1/abs.py`.  `_sort_title` is local to `core/scan.py`.  
+**Fix:** Move both to `core/normalize.py`, export them, and replace all
+call-sites with `from core.normalize import sort_name, sort_title`.  Eliminates
+three copies of the same logic and gives the test suite a single target.
+
+### `_get_or_create_author` — groundwork for alias resolution
+
+**File:** `core/scan.py`  
+**Note:** Currently does an exact `name ==` match, so `"Terry Maggert"` and
+`"Terry H. Maggert"` produce two `Author` rows.  The `author_aliases` table
+planned for v0.44.0 is the full fix; in v0.43.0 at minimum apply
+`author_names_match()` (already in `core/normalize.py`) as a pre-check before
+inserting to catch the most common variant collisions.
+
+---
+
+## v0.44.0 — Author Identity Resolution
+
+**Status:** Planned  
+**Goal:** Consolidate name variants behind a canonical `Author` row and surface
+the alias table via the API.
+
+### Author aliases (`author_aliases` table)
+
+Introduce an `author_aliases` table: `(id, author_id FK, alias, source)`.
+Populate it with every name variant seen during scanning.  Update
+`_get_or_create_author` to query aliases before inserting a new row.  Expose
+`GET /api/v1/authors/{id}/aliases` and `POST /api/v1/authors/{id}/aliases`.
+
+### `Book.asin` uniqueness review
+
+**Problem:** `asin` has a `UniqueConstraint` in the schema, but ASINs are not
+globally canonical — Amazon reuses them across marketplaces.  Expanding beyond
+English-language audiobooks risks constraint violations.  
+**Options:**
+- Change to a composite unique constraint `(asin, format)` or `(asin, language)`.
+- Drop the unique constraint and rely on the merge / dedup logic.
+- Keep unique but add a migration guard that logs instead of raising on
+  conflict (use `INSERT ... ON CONFLICT DO NOTHING` via SQLAlchemy
+  `insert(...).on_conflict_do_nothing(index_elements=["asin"])`).
+
+---
+
+## v0.46.0 — Test Suite
+
+**Status:** Planned  
+**Goal:** Establish a `pytest` baseline that covers the scan pipeline,
+confidence engine, and importer.
+
+### Promote `smoke_test.py` to pytest fixtures
+
+`smoke_test.py` validates the full stack manually.  Extract its setup steps
+into `conftest.py` fixtures (in-memory SQLite session, mock HTTP responders via
+`respx` or `pytest-httpx`, arq worker stub) and convert each scenario into a
+`pytest` test function.
+
+### Priority test targets
+
+| Module | Cases |
+|---|---|
+| `core/scan.py` | `_find_existing_book` Phase 1/2 — live row, deleted row, missing identifier |
+| `confidence.py` | Score regression suite — known inputs → expected tier |
+| `core/importer.py` | Archive extraction, audio collection, path sanitisation |
+| `core/normalize.py` | `sort_name`, `sort_title`, `author_names_match` |
+| `workers/tasks.py` | `import_download_task` — success path, missing book, unconfigured library |
 
 ---
 
