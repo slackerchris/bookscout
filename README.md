@@ -2,7 +2,11 @@
 
 Headless audiobook-tracking service. Queries Open Library, Google Books, and the Audible catalog to build complete author bibliographies, scores each book by confidence, checks your Audiobookshelf library for ownership, and delivers notifications via webhooks and SSE.
 
-There is **no web UI** — interaction is entirely through the REST API. Interactive docs are served at `/docs` (Swagger UI) and `/redoc`.
+~~There is **no web UI** — interaction is entirely through the REST API. Interactive docs are served at `/docs` (Swagger UI) and `/redoc`.~~
+**Announcing Bookscout UI** 
+https://github.com/slackerchris/bookscout-ui
+
+You can still use the REST API. Interactive docs are served at `/docs` (Swagger UI) and `/redoc`  if do not wish to install/use *Bookscout UI*
 
 ## Features
 
