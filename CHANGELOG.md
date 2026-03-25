@@ -1,5 +1,13 @@
 # BookScout Changelog
 
+## [0.49.3] - 2026-03-25
+
+### Fixed
+- **`scan_all_authors_task` crash (follow-up)** — `ctx["redis"]` provided by arq
+  is a plain `Redis` client, not an `ArqRedis` instance. Fixed by creating a
+  dedicated `ArqRedis` pool via `create_pool(_redis_settings())` instead of
+  reusing the context client.
+
 ## [0.49.2] - 2026-03-25
 
 ### Fixed
