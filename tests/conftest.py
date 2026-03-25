@@ -52,7 +52,11 @@ async def engine():
     def _set_sqlite_pragma(dbapi_conn, _):
         dbapi_conn.execute("PRAGMA foreign_keys=ON")
 
-    # Skip tables that use Postgres-only types (ARRAY, JSONB) unsupported by SQLite
+    # Skip tables that use Postgres-only types (ARRAY, JSONB) unsupported by SQLite.
+    # Consequence: the webhooks and webhook_deliveries tables are absent from the
+    # in-memory schema, so deliver_event() / _deliver() cannot be tested at the DB
+    # layer here.  See tests/test_webhook_delivery.py for mock-based coverage of
+    # that logic (session and httpx are patched; no real DB required).
     _SKIP_TABLES = {"webhooks", "webhook_deliveries"}
     _tables = [t for t in Base.metadata.sorted_tables if t.name not in _SKIP_TABLES]
     async with eng.begin() as conn:

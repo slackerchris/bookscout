@@ -80,6 +80,7 @@
 | 0.45.0 | Metadata response caching with TTL | ✅ Done |
 | 0.46.0 | pytest suite for `core/` + promoted smoke tests | ✅ Done |
 | 0.47.0 | Webhook retry with exponential backoff + dead endpoint detection | ✅ Done |
+| 0.48.0 | `_get_or_create_author` — normalised-name index + SQL fuzzy match | 📋 Planned |
 
 ---
 
@@ -640,7 +641,7 @@ data: {"book_id": 99, "title": "...", "score": 38, "reasons": ["no_isbn", "fuzzy
 - Fan out in parallel (`asyncio.gather`) to all registered active webhooks for the event type
 - Retry on failure: 3 attempts with exponential backoff (1s, 5s, 30s)
 - Log result to `webhook_deliveries` table
-- Dead endpoint detection: disable webhook after 10 consecutive failures
+- Dead endpoint detection: disable webhook after 5 consecutive failures (`_DEAD_THRESHOLD = 5`)
 
 ### Integration Targets
 | Target | Method |
@@ -1073,3 +1074,52 @@ ALTER TABLE webhooks ADD COLUMN last_success_at TIMESTAMPTZ;
 - [ ] `core/search.py` (or notifications module) — emit `webhook.disabled` SSE event on auto-disable
 - [ ] `CHANGELOG.md` — v0.45.0 entry
 - [ ] `VERSION` + `main.py` — bump to `0.45.0`
+
+---
+
+## v0.48.0 — Author Fuzzy-Match Scalability
+
+**Status:** Planned  
+**Goal:** Eliminate the O(n) full-table scan in `_get_or_create_author` step 3
+so the function scales to 500+ authors without a throughput hit.
+
+### Problem
+
+Step 3 loads every `Author` row and runs `author_names_match()` in Python.
+At ≤200 authors this is negligible; at 500+ it becomes the throughput ceiling
+for any scan that encounters a new name variant not yet in the aliases table.
+The alias table (step 2) already short-circuits this for *known* variants, but
+every truly new variant still pays the full scan cost once.
+
+### Fix — normalised name column + SQL lookup
+
+1. **Add `Author.name_normalized` column** (migration `0005`) — a pre-computed
+   version of the name with punctuation stripped and lowercased (same transform
+   as `_cache_author_key()`):
+   ```
+   "J.N. Chaney"  → "jnchaney"
+   "J. N. Chaney" → "jnchaney"
+   ```
+2. **Populate on insert/update** — set in `_get_or_create_author` step 4 at
+   creation time; backfill existing rows in the migration.
+3. **Replace the Python loop in step 3** with a single SQL query:
+   ```python
+   key = _cache_author_key(name)
+   result = await session.execute(
+       select(Author).where(Author.name_normalized == key)
+   )
+   author = result.scalar_one_or_none()
+   ```
+4. Add `Index("ix_authors_name_normalized", Author.name_normalized)` — makes
+   step 3 a single indexed lookup rather than a sequential scan.
+
+### Caveats
+
+- `_cache_author_key` strips all non-alphanumeric characters, which means
+  `"O'Brian"` and `"OBrian"` would collide.  Validate against the actual author
+  corpus before shipping.
+- `author_names_match()` handles initial expansion (e.g. `"J.N."` ↔ `"John N."`)
+  which a simple normalised-key equality check does *not*.  The normalised index
+  handles the punctuation/spacing class of variants; a separate trigram index
+  (pg_trgm) or application-level fallback may still be needed for initial
+  expansion cases.

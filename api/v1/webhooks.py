@@ -20,7 +20,9 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 # Delivery retry settings
 _MAX_ATTEMPTS = 3          # attempts per event delivery
 _BACKOFF_DELAYS = [0, 2, 8]  # seconds before attempt 1, 2, 3
-_DEAD_THRESHOLD = 5        # consecutive failures before auto-disabling
+_DEAD_THRESHOLD = 5        # consecutive fully-failed *events* before auto-disabling
+                           # (each event may exhaust _MAX_ATTEMPTS internally;
+                           #  failure_count increments by 1 per event, not per attempt)
 
 
 # ---------------------------------------------------------------------------
@@ -167,9 +169,14 @@ async def deliver_event(
     """Fan-out *event_type* to all active subscribed webhooks.
 
     Each endpoint is tried up to ``_MAX_ATTEMPTS`` times with exponential
-    backoff.  Consecutive failures increment ``Webhook.failure_count``; once
-    that reaches ``_DEAD_THRESHOLD`` the webhook is automatically deactivated
-    and ``disabled_at`` is recorded.  A successful delivery resets the counter.
+    backoff.  If all attempts for a given event fail, ``Webhook.failure_count``
+    is incremented by 1 (not by the number of attempts).  Once it reaches
+    ``_DEAD_THRESHOLD`` the webhook is automatically deactivated and
+    ``disabled_at`` is recorded.  A successful delivery resets the counter.
+
+    In other words: auto-disable triggers after ``_DEAD_THRESHOLD`` *events*
+    that saw zero successful delivery, not after that many individual HTTP
+    attempts.
     """
     result = await session.execute(select(Webhook).where(Webhook.active.is_(True)))
     for webhook in result.scalars():
@@ -213,12 +220,12 @@ async def _deliver(url: str, payload: dict, max_attempts: int = 1) -> tuple[bool
     Returns ``(success, last_http_status_code)``.
     """
     last_code: int | None = None
-    for i in range(max_attempts):
-        delay = _BACKOFF_DELAYS[i] if i < len(_BACKOFF_DELAYS) else _BACKOFF_DELAYS[-1]
-        if delay:
-            await asyncio.sleep(delay)
-        try:
-            async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient() as client:
+        for i in range(max_attempts):
+            delay = _BACKOFF_DELAYS[i] if i < len(_BACKOFF_DELAYS) else _BACKOFF_DELAYS[-1]
+            if delay:
+                await asyncio.sleep(delay)
+            try:
                 r = await client.post(url, json=payload, timeout=10)
                 if r.status_code < 400:
                     return True, r.status_code
@@ -228,12 +235,12 @@ async def _deliver(url: str, payload: dict, max_attempts: int = 1) -> tuple[bool
                     i + 1, max_attempts, r.status_code,
                     extra={"url": url},
                 )
-        except Exception as exc:
-            logger.warning(
-                "Webhook delivery attempt %d/%d network error",
-                i + 1, max_attempts,
-                extra={"url": url, "error": str(exc)},
-            )
+            except Exception as exc:
+                logger.warning(
+                    "Webhook delivery attempt %d/%d network error",
+                    i + 1, max_attempts,
+                    extra={"url": url, "error": str(exc)},
+                )
     return False, last_code
 
 

@@ -455,6 +455,14 @@ async def _get_or_create_author(session: AsyncSession, name: str) -> Author:
 
     # 3. Fuzzy match against all existing authors to catch name variants not
     #    yet in the aliases table (e.g. first time we see "Terry H. Maggert").
+    #
+    #    PERF NOTE: this is an O(n) full-table scan — acceptable up to ~200
+    #    authors, but becomes the throughput ceiling as the library grows.
+    #    The alias table (step 2) short-circuits this for every variant seen
+    #    after the first encounter, so the real-world hit rate drops over time.
+    #    A future fix would index a normalised name column (punctuation/case
+    #    stripped) and push the fuzzy comparison into a SQL WHERE clause,
+    #    eliminating the Python-side loop entirely.
     all_result = await session.execute(select(Author))
     for existing in all_result.scalars():
         if author_names_match(name, existing.name):
