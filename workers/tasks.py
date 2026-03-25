@@ -45,7 +45,9 @@ async def scan_all_authors_task(ctx: dict) -> dict[str, Any]:
 
     enqueued = 0
     if redis_client is not None:
-        arq_redis = redis_client  # ctx["redis"] is already an ArqRedis instance
+        from arq.connections import create_pool
+        from workers.settings import _redis_settings
+        arq_redis = await create_pool(_redis_settings())
         for aid in author_ids:
             await arq_redis.enqueue_job("scan_author_task", aid)
             enqueued += 1
