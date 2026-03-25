@@ -29,7 +29,6 @@ async def scan_all_authors_task(ctx: dict) -> dict[str, Any]:
     Dispatches one job per author so each runs within its own timeout budget
     rather than running all authors inline and hitting the single-job limit.
     """
-    from arq import ArqRedis
     from sqlalchemy import select
     from db.models import Author, Watchlist
 
@@ -46,7 +45,7 @@ async def scan_all_authors_task(ctx: dict) -> dict[str, Any]:
 
     enqueued = 0
     if redis_client is not None:
-        arq_redis = ArqRedis(redis_client)
+        arq_redis = redis_client  # ctx["redis"] is already an ArqRedis instance
         for aid in author_ids:
             await arq_redis.enqueue_job("scan_author_task", aid)
             enqueued += 1

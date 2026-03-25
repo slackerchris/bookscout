@@ -1,12 +1,25 @@
 # BookScout Changelog
 
+## [0.49.2] - 2026-03-25
+
+### Fixed
+- **`scan_all_authors_task` crash** — `ArqRedis(redis_client)` was wrapping an
+  already-constructed `ArqRedis` instance (injected by arq into `ctx["redis"]`)
+  in a second `ArqRedis()` call, causing `AttributeError: 'Redis' object has no
+  attribute 'connection_kwargs'` on every scan-all invocation. The fix uses
+  `ctx["redis"]` directly as the arq connection.
+- **Run-together initials normalisation** — `"D.E. Sherman"` and
+  `"D. E. Sherman"` now normalise to the same string. A pre-processing step in
+  `normalize_author_name()` inserts a space between adjacent letter-period-letter
+  sequences before stripping all periods.
+
 ## [0.49.1] - 2026-03-25
 
 ### Fixed
 - **ABS author import strips role annotations** — author name parts from ABS metadata
   are now cleaned before import. Suffixes like `- editor`, `(narrator)`,
-  `- Author & Narrator`, `- Translator & Editor`, `(foreword)`, `(introduction)`,
-  and `(contributor)` are stripped via a regex applied in
+  `- Author & Narrator`, `- Translator & Editor`, `(foreword)`, `(afterword)`,
+  `(introduction)`, and `(contributor)` are stripped via a regex applied in
   `get_all_authors_from_audiobookshelf()` before the name hits the deduplication
   and noise-filter logic. This ensures "Christopher Tolkien - editor" is stored
   as "Christopher Tolkien" and correctly deduplicates against any existing

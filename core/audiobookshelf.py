@@ -17,8 +17,8 @@ from core.normalize import normalize_author_name
 #   "John Smith - Author & Narrator"
 #   "Someone - Translator & Editor"
 _ROLE_SUFFIX_RE = re.compile(
-    r"\s*[-–(]\s*(?:editor|narrator|author|translator|illustrator|foreword|introduction|contributor)"
-    r"(?:\s*[&,]\s*(?:editor|narrator|author|translator|illustrator|foreword|introduction|contributor))*"
+    r"\s*[-–(]\s*(?:editor|narrator|author|translator|illustrator|foreword|afterword|introduction|contributor)"
+    r"(?:\s*[&,]\s*(?:editor|narrator|author|translator|illustrator|foreword|afterword|introduction|contributor))*"
     r"\s*\)?$",
     re.IGNORECASE,
 )

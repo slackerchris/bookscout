@@ -9,6 +9,9 @@ _VOWELS = frozenset("aeiou")
 def normalize_author_name(name: str) -> str:
     """Lower-case, remove periods, collapse whitespace, strip common suffixes."""
     n = name.lower().strip()
+    # Ensure run-together initials like "D.E." are spaced out before stripping
+    # periods, so "D.E. Sherman" and "D. E. Sherman" normalise identically.
+    n = re.sub(r"(?<=[a-z])\.(?=[a-z])", " ", n)
     n = re.sub(r"\.", "", n)
     n = re.sub(r"\s+", " ", n)
     n = re.sub(r"\s+(jr|sr|ii|iii|iv)$", "", n)
