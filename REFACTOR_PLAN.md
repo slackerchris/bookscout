@@ -81,7 +81,8 @@
 | 0.46.0 | pytest suite for `core/` + promoted smoke tests | ✅ Done |
 | 0.47.0 | Webhook retry with exponential backoff + dead endpoint detection | ✅ Done |
 | 0.48.0 | `GET /api/v1/authors/{id}/languages` — language catalog breakdown + `books.language` column | ✅ Done |
-| 0.49.0 | `_get_or_create_author` — normalised-name index + SQL fuzzy match | 📋 Planned |
+| 0.49.0 | `GET /api/v1/books?updated_since=` — delta-poll filter for n8n / offline recovery | ✅ Done |
+| 0.50.0 | `_get_or_create_author` — normalised-name index + SQL fuzzy match | 📋 Planned |
 
 ---
 
@@ -1122,7 +1123,35 @@ for older rows — let re-scans fill in the real data.
 
 ---
 
-## v0.49.0 — Author Fuzzy-Match Scalability
+## v0.49.0 — Books Delta-Poll Filter
+
+**Status:** Done  
+**Goal:** Let polling workflows recover any discovery window missed while they
+were offline, without needing to diff the full catalog client-side.
+
+### `updated_since` query parameter
+
+**File:** `api/v1/books.py`  
+**Usage:** `GET /api/v1/books?updated_since=2026-03-25T12:00:00Z`
+
+Adds a single `WHERE books.updated_at > :updated_since` clause.  Combines
+freely with all existing filters.  Strict `>` (not `>=`) avoids re-emitting
+the boundary row when the caller stores the last `updated_at` it received as
+its cursor.
+
+**Typical n8n pattern:**
+1. On each scheduled run, read the stored cursor (e.g. from a static data
+   node or a Postgres node) — default to epoch if first run.
+2. `GET /api/v1/books?updated_since=<cursor>&have_it=false`
+3. Process results, then update cursor to `max(updated_at)` of the
+   returned batch.
+
+This is complementary to webhooks: webhooks cover the real-time case;
+`updated_since` covers catch-up after a workflow outage or manual back-fill.
+
+---
+
+## v0.50.0 — Author Fuzzy-Match Scalability
 
 **Status:** Planned  
 **Goal:** Eliminate the O(n) full-table scan in `_get_or_create_author` step 3

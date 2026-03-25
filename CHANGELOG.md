@@ -1,5 +1,16 @@
 # BookScout Changelog
 
+## [0.49.0] - 2026-03-25
+
+### Added
+- **`GET /api/v1/books?updated_since=<ISO 8601>`** — new query parameter that
+  filters results to books whose `updated_at` is strictly after the given
+  timestamp.  Combines freely with all existing filters (`author_id`,
+  `confidence_band`, `have_it`, `missing_only`).  Designed for polling
+  workflows (e.g. n8n) that process only new discoveries since their last run,
+  recovering any window missed while the workflow was offline without needing
+  to diff the full catalog.
+
 ## [0.48.0] - 2026-03-25
 
 ### Added

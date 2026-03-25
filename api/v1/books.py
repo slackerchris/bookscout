@@ -71,6 +71,14 @@ async def list_books(
     have_it: bool | None = Query(None, description="Owned flag filter"),
     missing_only: bool = Query(False, description="Shorthand for have_it=false"),
     include_deleted: bool = Query(False),
+    updated_since: datetime | None = Query(
+        None,
+        description=(
+            "ISO 8601 timestamp; return only books whose updated_at is after this "
+            "value.  Useful for polling workflows (e.g. n8n) that need only the "
+            "delta since their last run."
+        ),
+    ),
     session: AsyncSession = Depends(get_session),
 ) -> list[Book]:
     q = select(Book)
@@ -95,6 +103,9 @@ async def list_books(
         q = q.where(Book.have_it.is_(False))
     elif have_it is not None:
         q = q.where(Book.have_it == have_it)
+
+    if updated_since is not None:
+        q = q.where(Book.updated_at > updated_since)
 
     q = q.order_by(Book.title_sort)
     result = await session.execute(q)
