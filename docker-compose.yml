@@ -139,6 +139,25 @@ services:
     networks:
       - bookscout
 
+  # ── Optional UI (opt-in via profile) ───────────────────────────────────────
+  # Start with:  docker compose --profile ui up -d
+  # The UI is a nginx container that proxies /api/ → bookscout:8765 and serves
+  # the SPA on port 8080.  It must share the bookscout network to reach the API.
+  # Pin a specific release tag if you need stability, e.g.:
+  #   image: ghcr.io/slackerchris/bookscout-ui:1.2.6
+  ui:
+    image: ghcr.io/slackerchris/bookscout-ui:latest
+    container_name: bookscout-ui
+    profiles: [ui]
+    ports:
+      - "${UI_PORT:-8080}:80"
+    depends_on:
+      bookscout:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - bookscout
+
 networks:
   bookscout:
     driver: bridge
