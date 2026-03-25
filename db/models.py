@@ -66,7 +66,12 @@ class Book(Base):
     title           = Column(Text, nullable=False)
     title_sort      = Column(Text, nullable=False)
     subtitle        = Column(Text)
-    asin            = Column(Text, unique=True)
+    # NOTE: asin is intentionally NOT unique at the DB level (constraint dropped
+    # in migration 0003).  Amazon ASINs are reused across marketplaces, so a
+    # unique constraint raises false violations when the catalog expands beyond
+    # English-language audiobooks.  Duplicate prevention is handled entirely by
+    # _find_existing_book() Phase-1 lookup in core/scan.py.
+    asin            = Column(Text)
     isbn            = Column(Text)
     isbn13          = Column(Text)
     published_year  = Column(Integer)

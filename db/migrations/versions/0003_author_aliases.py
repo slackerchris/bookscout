@@ -50,6 +50,8 @@ def upgrade() -> None:
     op.create_index("ix_author_aliases_author_id", "author_aliases", ["author_id"])
 
     # ── books.asin — drop unique constraint ──────────────────────────────────
+    # See module docstring for reasoning (ASIN marketplace reuse / cross-language
+    # catalog expansion).  Dedup is enforced by _find_existing_book() Phase-1.
     op.drop_constraint("uq_books_asin", "books", type_="unique")
 
 
