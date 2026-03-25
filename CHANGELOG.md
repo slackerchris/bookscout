@@ -1,5 +1,17 @@
 # BookScout Changelog
 
+## [0.49.1] - 2026-03-25
+
+### Fixed
+- **ABS author import strips role annotations** — author name parts from ABS metadata
+  are now cleaned before import. Suffixes like `- editor`, `(narrator)`,
+  `- Author & Narrator`, `- Translator & Editor`, `(foreword)`, `(introduction)`,
+  and `(contributor)` are stripped via a regex applied in
+  `get_all_authors_from_audiobookshelf()` before the name hits the deduplication
+  and noise-filter logic. This ensures "Christopher Tolkien - editor" is stored
+  as "Christopher Tolkien" and correctly deduplicates against any existing
+  "Christopher Tolkien" entry.
+
 ## [0.49.0] - 2026-03-25
 
 ### Added

@@ -5,10 +5,23 @@ Accepts pre-configured URL and token so callers remain in control of config.
 from __future__ import annotations
 
 import logging
+import re
 
 import httpx
 
 from core.normalize import normalize_author_name
+
+# Matches role annotations appended to author names in ABS metadata, e.g.:
+#   "Christopher Tolkien - editor"
+#   "Jane Doe (narrator)"
+#   "John Smith - Author & Narrator"
+#   "Someone - Translator & Editor"
+_ROLE_SUFFIX_RE = re.compile(
+    r"\s*[-–(]\s*(?:editor|narrator|author|translator|illustrator|foreword|introduction|contributor)"
+    r"(?:\s*[&,]\s*(?:editor|narrator|author|translator|illustrator|foreword|introduction|contributor))*"
+    r"\s*\)?$",
+    re.IGNORECASE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +143,10 @@ async def get_all_authors_from_audiobookshelf(
                             raw = raw.replace(sep, "||")
                         for part in raw.split("||"):
                             part = part.strip()
+                            if len(part) <= 1:
+                                continue
+                            # Strip role annotations: "- editor", "(narrator)", etc.
+                            part = _ROLE_SUFFIX_RE.sub("", part).strip()
                             if len(part) <= 1:
                                 continue
                             if part.lower() in _NOISE_AUTHORS:
