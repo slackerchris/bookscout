@@ -18,8 +18,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable, Coroutine
 
 import httpx
 from sqlalchemy import and_, delete, select
@@ -36,7 +37,7 @@ from core.metadata import (
     search_audible_metadata_direct,
 )
 from core.normalize import author_names_match, sort_name, sort_title
-from db.models import Author, Book, BookAuthor, Watchlist
+from db.models import Author, AuthorAlias, Book, BookAuthor, Watchlist
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ async def scan_author_by_id(
     abs_url = ""
     abs_token = ""
     auto_add_coauthors = False
+    cache_ttl_seconds = 86400  # 24 h default
     src_ol = True
     src_gb = True
     src_audible = True
@@ -70,6 +72,8 @@ async def scan_author_by_id(
         sources_cfg = getattr(scan_cfg, "sources", None)
         language_filter = getattr(scan_cfg, "language_filter", "en") or "en"
         auto_add_coauthors = bool(getattr(scan_cfg, "auto_add_coauthors", False))
+        cache_ttl_hours = int(getattr(scan_cfg, "cache_ttl_hours", 24) or 24)
+        cache_ttl_seconds = cache_ttl_hours * 3600
         google_api_key = getattr(apis_cfg, "google_books_key", "") or ""
         isbndb_api_key = getattr(apis_cfg, "isbndb_key", "") or ""
         abs_url = getattr(abs_cfg, "url", "") or ""
@@ -93,25 +97,51 @@ async def scan_author_by_id(
     async with httpx.AsyncClient() as client:
         source_tasks = []
         if src_ol:
-            source_tasks.append(query_openlibrary(client, author_name, language_filter))
+            source_tasks.append(
+                _cached_query(
+                    redis_client, cache_ttl_seconds,
+                    f"bookscout:meta:openlibrary:{_cache_author_key(author_name)}:{language_filter}",
+                    query_openlibrary(client, author_name, language_filter),
+                )
+            )
         if src_gb:
-            source_tasks.append(query_google_books(client, author_name, language_filter, google_api_key or None))
+            source_tasks.append(
+                _cached_query(
+                    redis_client, cache_ttl_seconds,
+                    f"bookscout:meta:google:{_cache_author_key(author_name)}:{language_filter}",
+                    query_google_books(client, author_name, language_filter, google_api_key or None),
+                )
+            )
         if src_audible:
-            source_tasks.append(query_audnexus(client, author_name, language_filter))
+            source_tasks.append(
+                _cached_query(
+                    redis_client, cache_ttl_seconds,
+                    f"bookscout:meta:audnexus:{_cache_author_key(author_name)}:{language_filter}",
+                    query_audnexus(client, author_name, language_filter),
+                )
+            )
         if src_isbndb and isbndb_api_key:
             source_tasks.append(
-                query_isbndb(client, author_name, isbndb_api_key, language_filter)
+                _cached_query(
+                    redis_client, cache_ttl_seconds,
+                    f"bookscout:meta:isbndb:{_cache_author_key(author_name)}:{language_filter}",
+                    query_isbndb(client, author_name, isbndb_api_key, language_filter),
+                )
             )
 
         source_results = await asyncio.gather(*source_tasks)
         all_books = merge_books(list(source_results))
         all_books = score_books(all_books, search_author=author_name)
 
-        # ABS ownership + series (serialised to stay under ABS rate limit)
-        for book in all_books:
-            has_it, abs_series, abs_pos = await check_audiobookshelf(
-                client, book["title"], author_name, abs_url, abs_token
-            )
+        # ABS ownership + series — up to 4 concurrent checks to speed up
+        # prolific-author scans while staying well under ABS rate limits.
+        abs_sem = asyncio.Semaphore(4)
+
+        async def _enrich_book(book: dict[str, Any]) -> None:
+            async with abs_sem:
+                has_it, abs_series, abs_pos = await check_audiobookshelf(
+                    client, book["title"], author_name, abs_url, abs_token
+                )
             book["have_it"] = has_it
             if abs_series:
                 book["series"] = abs_series
@@ -123,6 +153,8 @@ async def scan_author_by_id(
                 if aud_series:
                     book["series"] = aud_series
                     book["series_position"] = aud_pos
+
+        await asyncio.gather(*(_enrich_book(b) for b in all_books))
 
     # ------------------------------------------------------------------ persist
     new_books = 0
@@ -278,7 +310,7 @@ async def scan_author_by_id(
         if not on_watchlist:
             if auto_add_coauthors:
                 if not co_obj:
-                    co_obj = Author(name=co_name, name_sort=_sort_name(co_name))
+                    co_obj = Author(name=co_name, name_sort=sort_name(co_name))
                     session.add(co_obj)
                     await session.flush()
                 session.add(Watchlist(author_id=co_obj.id))
@@ -384,7 +416,7 @@ async def _find_existing_book(
                 is_cross = link_q.scalar_one_or_none() is None
                 return found, is_cross
 
-    # Phase 2: author-scoped title fallback
+    # Phase 2: author-scoped title fallback; skip soft-deleted rows
     q = await session.execute(
         select(Book)
         .join(BookAuthor, Book.id == BookAuthor.book_id)
@@ -393,6 +425,7 @@ async def _find_existing_book(
                 BookAuthor.author_id == author_id,
                 BookAuthor.role == "author",
                 Book.title == book["title"],
+                Book.deleted.is_(False),
             )
         )
     )
@@ -400,13 +433,55 @@ async def _find_existing_book(
 
 
 async def _get_or_create_author(session: AsyncSession, name: str) -> Author:
+    # 1. Exact match (fast, indexed path)
     result = await session.execute(select(Author).where(Author.name == name))
     author = result.scalar_one_or_none()
-    if not author:
-        author = Author(name=name, name_sort=sort_name(name))
-        session.add(author)
-        await session.flush()
+    if author:
+        await _record_alias(session, author, name, "scan")
+        return author
+
+    # 2. Check the aliases table for a previously seen variant
+    alias_q = await session.execute(
+        select(AuthorAlias).where(AuthorAlias.alias == name)
+    )
+    alias_row = alias_q.scalar_one_or_none()
+    if alias_row:
+        author_q = await session.execute(
+            select(Author).where(Author.id == alias_row.author_id)
+        )
+        author = author_q.scalar_one_or_none()
+        if author:
+            return author
+
+    # 3. Fuzzy match against all existing authors to catch name variants not
+    #    yet in the aliases table (e.g. first time we see "Terry H. Maggert").
+    all_result = await session.execute(select(Author))
+    for existing in all_result.scalars():
+        if author_names_match(name, existing.name):
+            await _record_alias(session, existing, name, "scan")
+            return existing
+
+    # 4. No match — create a new author row and seed its canonical name as
+    #    the first alias.
+    author = Author(name=name, name_sort=sort_name(name))
+    session.add(author)
+    await session.flush()  # populate author.id
+    await _record_alias(session, author, name, "scan")
     return author
+
+
+async def _record_alias(
+    session: AsyncSession, author: Author, alias: str, source: str
+) -> None:
+    """Insert an AuthorAlias row if the (author_id, alias) pair is new."""
+    existing = await session.execute(
+        select(AuthorAlias).where(
+            AuthorAlias.author_id == author.id,
+            AuthorAlias.alias == alias,
+        )
+    )
+    if existing.scalar_one_or_none() is None:
+        session.add(AuthorAlias(author_id=author.id, alias=alias, source=source))
 
 
 def _parse_year(release_date: Any) -> int | None:
@@ -416,3 +491,47 @@ def _parse_year(release_date: Any) -> int | None:
         return int(str(release_date)[:4])
     except (ValueError, TypeError):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Metadata cache helpers
+# ---------------------------------------------------------------------------
+
+def _cache_author_key(name: str) -> str:
+    """Normalise an author name into a compact Redis key segment."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+async def _cached_query(
+    redis_client: Any,
+    ttl_seconds: int,
+    key: str,
+    coro: Coroutine[Any, Any, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Return cached metadata results when available, otherwise execute *coro*.
+
+    Results are stored as a JSON blob in Redis under *key* with a TTL of
+    *ttl_seconds*.  When Redis is unavailable or caching is disabled
+    (``redis_client`` is None or ``ttl_seconds`` <= 0), *coro* is executed
+    directly with no caching overhead.
+    """
+    if redis_client is None or ttl_seconds <= 0:
+        return await coro
+
+    try:
+        cached = await redis_client.get(key)
+        if cached is not None:
+            logger.debug("Cache hit", extra={"key": key})
+            return json.loads(cached)
+    except Exception as exc:
+        logger.warning("Cache read failed", extra={"key": key, "error": str(exc)})
+
+    result = await coro
+
+    try:
+        await redis_client.set(key, json.dumps(result), ex=ttl_seconds)
+        logger.debug("Cache stored", extra={"key": key, "ttl": ttl_seconds})
+    except Exception as exc:
+        logger.warning("Cache write failed", extra={"key": key, "error": str(exc)})
+
+    return result

@@ -28,3 +28,8 @@ rich>=13.7.0
 # ── Post-download importer (optional — gracefully skipped if absent) ─────────
 rarfile>=4.0      # .rar extraction (also needs unrar-free system package)
 py7zr>=0.20.0     # .7z extraction (pure Python, no system dep needed)
+
+# ── Testing ──────────────────────────────────────────────────────────────────
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+aiosqlite>=0.20.0   # async SQLite driver for in-memory DB tests

@@ -35,6 +35,28 @@ class Author(Base):
 
     book_authors    = relationship("BookAuthor", back_populates="author", cascade="all, delete-orphan")
     watchlist_entry = relationship("Watchlist",  back_populates="author", uselist=False, cascade="all, delete-orphan")
+    aliases         = relationship("AuthorAlias", back_populates="author", cascade="all, delete-orphan")
+
+
+class AuthorAlias(Base):
+    """Name variants for a canonical Author row (v0.44.0+).
+
+    ``source`` records where the variant was seen: ``'scan'``, ``'abs'``,
+    ``'manual'``, etc.  The combination of ``(author_id, alias)`` is unique
+    so the same variant cannot be stored twice for the same author.
+    """
+    __tablename__ = "author_aliases"
+    __table_args__ = (
+        UniqueConstraint("author_id", "alias", name="uq_author_alias"),
+    )
+
+    id        = Column(Integer, primary_key=True)
+    author_id = Column(Integer, ForeignKey("authors.id", ondelete="CASCADE"), nullable=False)
+    alias     = Column(Text, nullable=False)
+    source    = Column(Text, nullable=False, server_default="scan")  # 'scan' | 'abs' | 'manual'
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    author = relationship("Author", back_populates="aliases")
 
 
 class Book(Base):
@@ -123,12 +145,14 @@ class Webhook(Base):
     """Registered webhook consumers (v0.35.0+)."""
     __tablename__ = "webhooks"
 
-    id          = Column(Integer, primary_key=True)
-    url         = Column(Text, nullable=False, unique=True)
-    description = Column(Text)
-    events      = Column(ARRAY(Text))   # e.g. ['book.discovered', 'scan.complete']
-    active      = Column(Boolean, server_default="true", nullable=False)
-    created_at  = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    id            = Column(Integer, primary_key=True)
+    url           = Column(Text, nullable=False, unique=True)
+    description   = Column(Text)
+    events        = Column(ARRAY(Text))   # e.g. ['book.discovered', 'scan.complete']
+    active        = Column(Boolean, server_default="true", nullable=False)
+    failure_count = Column(Integer, server_default="0", nullable=False)
+    disabled_at   = Column(TIMESTAMP(timezone=True))
+    created_at    = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     deliveries = relationship("WebhookDelivery", back_populates="webhook", cascade="all, delete-orphan")
 

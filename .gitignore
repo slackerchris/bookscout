@@ -1,4 +1,10 @@
 venv/
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
 
 # Local secrets — never commit
 .env

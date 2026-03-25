@@ -45,6 +45,7 @@ _DEFAULT: dict = {
         "max_concurrent_scans": 5,
         "language_filter": "all",
         "auto_add_coauthors": False,
+        "cache_ttl_hours": 24,
         "sources": {
             "openlibrary": True,
             "google_books": True,
@@ -130,6 +131,8 @@ def _apply_env_overrides(data: dict) -> dict:
         data["postprocess"]["mode"] = v
     if v := env.get("POSTPROCESS_LIBRARY_ROOT"):
         data["postprocess"]["library_root"] = v
+    if v := env.get("SCAN_CACHE_TTL_HOURS"):
+        data["scan"]["cache_ttl_hours"] = int(v)
 
     return data
 

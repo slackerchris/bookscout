@@ -43,6 +43,7 @@ scan:
   max_concurrent_scans: 5
   language_filter: en           # "all" or ISO 639-1 code, e.g. "en", "de", "fr"
   auto_add_coauthors: false     # when true, discovered co-authors are added to the watchlist automatically
+  cache_ttl_hours: 24           # how long to cache raw metadata API responses in Redis; 0 = disable
 
 server:
   host: "0.0.0.0"

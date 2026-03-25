@@ -13,7 +13,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.normalize import sort_name
-from db.models import Author, Book, BookAuthor, Watchlist
+from db.models import Author, AuthorAlias, Book, BookAuthor, Watchlist
 from db.session import get_session
 
 router = APIRouter(prefix="/authors", tags=["authors"])
@@ -41,6 +41,21 @@ class CoAuthorOut(BaseModel):
     name: str
     on_watchlist: bool
     book_count: int
+
+
+class AliasOut(BaseModel):
+    id: int
+    alias: str
+    source: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AliasCreate(BaseModel):
+    alias: str
+    source: str = "manual"
 
 
 class AuthorOut(BaseModel):
@@ -276,6 +291,79 @@ async def _get_or_404(session: AsyncSession, author_id: int) -> Author:
     if not author:
         raise HTTPException(status_code=404, detail="Author not found")
     return author
+
+
+# ---------------------------------------------------------------------------
+# Alias routes
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/{author_id}/aliases",
+    response_model=list[AliasOut],
+    summary="List all known name aliases for an author",
+)
+async def list_aliases(
+    author_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> list[AuthorAlias]:
+    await _get_or_404(session, author_id)
+    result = await session.execute(
+        select(AuthorAlias)
+        .where(AuthorAlias.author_id == author_id)
+        .order_by(AuthorAlias.created_at)
+    )
+    return list(result.scalars().all())
+
+
+@router.post(
+    "/{author_id}/aliases",
+    response_model=AliasOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a name alias for an author",
+)
+async def create_alias(
+    author_id: int,
+    body: AliasCreate,
+    session: AsyncSession = Depends(get_session),
+) -> AuthorAlias:
+    await _get_or_404(session, author_id)
+    existing = await session.execute(
+        select(AuthorAlias).where(
+            AuthorAlias.author_id == author_id,
+            AuthorAlias.alias == body.alias,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Alias already exists for this author")
+    alias = AuthorAlias(author_id=author_id, alias=body.alias, source=body.source)
+    session.add(alias)
+    await session.commit()
+    await session.refresh(alias)
+    return alias
+
+
+@router.delete(
+    "/{author_id}/aliases/{alias_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a name alias",
+)
+async def delete_alias(
+    author_id: int,
+    alias_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    await _get_or_404(session, author_id)
+    result = await session.execute(
+        select(AuthorAlias).where(
+            AuthorAlias.id == alias_id,
+            AuthorAlias.author_id == author_id,
+        )
+    )
+    alias = result.scalar_one_or_none()
+    if not alias:
+        raise HTTPException(status_code=404, detail="Alias not found")
+    await session.delete(alias)
+    await session.commit()
 
 
 

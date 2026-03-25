@@ -75,11 +75,11 @@
 | 0.42.0 | Download integration + post-download file organisation | ✅ Done |
 | 0.42.1 | Full env-var config + qBittorrent post-process hook | ✅ Done |
 | 0.42.2 | Hotfix: `book.series_name` + `files_moved` type check in importer task | ✅ Done |
-| 0.43.0 | Data integrity hardening + scan performance + code hygiene | 🔜 Next |
-| 0.44.0 | Author identity resolution (`author_aliases`) + scan metrics | 📋 Planned |
-| 0.45.0 | Metadata response caching with TTL | 📋 Planned |
-| 0.46.0 | pytest suite for `core/` + promoted smoke tests | 📋 Planned |
-| 0.47.0 | Webhook retry with exponential backoff + dead endpoint detection | 📋 Planned |
+| 0.43.0 | Data integrity hardening + scan performance + code hygiene | ✅ Done |
+| 0.44.0 | Author identity resolution (`author_aliases`) + scan metrics | ✅ Done |
+| 0.45.0 | Metadata response caching with TTL | ✅ Done |
+| 0.46.0 | pytest suite for `core/` + promoted smoke tests | ✅ Done |
+| 0.47.0 | Webhook retry with exponential backoff + dead endpoint detection | ✅ Done |
 
 ---
 

@@ -1,5 +1,128 @@
 # BookScout Changelog
 
+## [0.47.0] - 2026-03-25
+
+### Added
+- **`api/v1/webhooks._deliver()` — exponential backoff retry** — delivery now
+  retries up to 3 attempts (delays: 0 s, 2 s, 8 s) before recording a failure.
+  The single-attempt `test` endpoint keeps its original one-shot behaviour.
+- **Dead endpoint detection** — `deliver_event()` now tracks consecutive
+  delivery failures per webhook.  Once `failure_count` reaches 5 the webhook is
+  automatically deactivated (`active=False`, `disabled_at` timestamp set) and a
+  `WARNING` log entry is emitted.  A successful delivery resets `failure_count`
+  to 0.
+- **`POST /api/v1/webhooks/{id}/reactivate`** — re-enables a webhook that was
+  auto-disabled by dead endpoint detection (or manually via DELETE), resetting
+  `failure_count` and clearing `disabled_at`.
+- **`Webhook.failure_count` / `Webhook.disabled_at`** — new schema columns
+  exposed on `WebhookOut` responses so callers can see the health of each
+  registered endpoint.
+- **Migration `0004_webhook_retry`** — adds `failure_count INTEGER NOT NULL
+  DEFAULT 0` and `disabled_at TIMESTAMPTZ` to the `webhooks` table.
+
+## [0.46.0] - 2026-03-25
+
+### Added
+- **`tests/` — pytest suite** — 84 tests covering `core/normalize.py`,
+  `confidence.py`, `core/importer.py`, `core/scan._find_existing_book()`, and
+  `core/scan._cached_query()`.  Tests use `pytest-asyncio` (auto mode) and an
+  in-memory SQLite database via `aiosqlite` so no external services are needed.
+- **`tests/conftest.py`** — shared fixtures: session-scoped async engine with
+  FK enforcement, per-test rolled-back `AsyncSession`, and a book-dict factory.
+- **`pytest.ini`** — project pytest configuration (`asyncio_mode = auto`,
+  `testpaths = tests`).
+- Added `pytest>=8.0.0`, `pytest-asyncio>=0.23.0`, `aiosqlite>=0.20.0` to
+  `requirements.txt`.
+
+### Fixed
+- **`core/scan._find_existing_book()` Phase 2** — title fallback query now
+  excludes soft-deleted books (matches Phase 1 behaviour).  Previously a
+  deleted book could be returned via Phase 2 even though Phase 1 correctly
+  filtered it out by identifier.
+
+## [0.45.0] - 2026-03-25
+
+### Added
+- **`core/scan.py` — `_cached_query()`** — Redis-backed cache wrapper for
+  raw metadata API responses.  Each source's result list is serialised to
+  JSON and stored under a key of the form
+  `bookscout:meta:{source}:{author}:{lang}`.  On the next scan for the same
+  author and language, the cached payload is returned immediately without
+  hitting the external API.  Cache misses are transparent; Redis errors
+  (read or write) are caught, logged at `WARNING`, and fall through to a
+  live query so a Redis hiccup never breaks a scan.
+- **`core/scan.py` — `_cache_author_key()`** — normalises an author name to
+  a compact alphanumeric key segment (e.g. `"J.N. Chaney"` → `"jnchaney"`).
+- **`config.py` / `config.yaml.example`** — new `scan.cache_ttl_hours`
+  setting (default: `24`).  Set to `0` to disable caching entirely.  Can
+  also be controlled via the `SCAN_CACHE_TTL_HOURS` environment variable.
+
+### Changed
+- **`core/scan.py` — source query tasks** — all four metadata source calls
+  (`query_openlibrary`, `query_google_books`, `query_audnexus`,
+  `query_isbndb`) are now wrapped with `_cached_query()` so repeat scans of
+  the same author within the TTL window are served from Redis rather than
+  making fresh outbound HTTP requests.  The `metadata.py` functions
+  themselves remain stateless and unchanged.
+
+---
+
+## [0.44.0] - 2026-03-25
+
+### Added
+- **`db/models.py` — `AuthorAlias` model** — new `author_aliases` table:
+  `(id, author_id FK, alias, source, created_at)`.  The `(author_id, alias)`
+  pair is unique.  `source` records where the variant was seen (`'scan'`,
+  `'abs'`, `'manual'`).  Cascades on author delete.
+- **`db/migrations/versions/0003_author_aliases.py`** — Alembic migration
+  that creates `author_aliases`, adds indexes on `alias` and `author_id`,
+  and **drops** the `uq_books_asin` unique constraint on `books.asin`.
+- **`GET /api/v1/authors/{id}/aliases`** — returns all known name variants
+  for an author, ordered by insertion time.
+- **`POST /api/v1/authors/{id}/aliases`** — manually register a new alias
+  (`alias`, `source` defaulting to `"manual"`); 409 if it already exists.
+- **`DELETE /api/v1/authors/{id}/aliases/{alias_id}`** — remove a specific
+  alias by id.
+
+### Changed
+- **`core/scan.py` — `_get_or_create_author()`** — full alias resolution
+  pipeline: (1) exact `Author.name` match, (2) `author_aliases` table
+  lookup for a previously seen variant, (3) fuzzy `author_names_match()`
+  scan as last resort.  Every variant that passes through the function is
+  recorded in `author_aliases` via the new `_record_alias()` helper, so
+  future lookups hit step 2 (alias table) instead of the linear scan.
+- **`core/scan.py` — new `_record_alias()` helper** — inserts an
+  `AuthorAlias` row if `(author_id, alias)` is not already present.
+- **`books.asin` unique constraint dropped** — Amazon ASINs are not globally
+  canonical (reused across marketplaces).  Duplicate prevention is now
+  handled entirely by the `_find_existing_book` Phase-1 lookup.
+
+---
+
+## [0.43.0] - 2026-03-25
+
+### Added
+- **`core/scan.py` — `_get_or_create_author()`** — added fuzzy name-match
+  pre-check using `author_names_match()` before inserting a new `Author` row.
+  Exact match is tried first (indexed, fast); if that misses, all existing
+  authors are checked with `author_names_match()` to catch common variants
+  such as `"Terry Maggert"` vs `"Terry H. Maggert"`.  Prevents duplicate
+  author rows for the most common collision patterns ahead of the full alias
+  resolution landing in v0.44.0.
+- **`core/scan.py` — ABS concurrency** — replaced the serial
+  per-book `check_audiobookshelf` loop with `asyncio.gather` gated by
+  `asyncio.Semaphore(4)`.  Up to 4 ABS ownership checks now run in parallel,
+  significantly reducing scan wall time for prolific authors (200+ books was
+  previously 200+ sequential round-trips).
+
+### Fixed
+- **`core/scan.py` — `_sort_name` stale reference** — co-author discovery
+  block was calling the removed `_sort_name()` private function (deleted in
+  v0.42.3) when `auto_add_coauthors` is enabled.  Replaced with the canonical
+  `sort_name()` import from `core.normalize`.
+
+---
+
 ## [0.42.3] - 2026-03-23
 
 ### Changed
