@@ -80,7 +80,8 @@
 | 0.45.0 | Metadata response caching with TTL | ✅ Done |
 | 0.46.0 | pytest suite for `core/` + promoted smoke tests | ✅ Done |
 | 0.47.0 | Webhook retry with exponential backoff + dead endpoint detection | ✅ Done |
-| 0.48.0 | `_get_or_create_author` — normalised-name index + SQL fuzzy match | 📋 Planned |
+| 0.48.0 | `GET /api/v1/authors/{id}/languages` — language catalog breakdown + `books.language` column | ✅ Done |
+| 0.49.0 | `_get_or_create_author` — normalised-name index + SQL fuzzy match | 📋 Planned |
 
 ---
 
@@ -1077,7 +1078,51 @@ ALTER TABLE webhooks ADD COLUMN last_success_at TIMESTAMPTZ;
 
 ---
 
-## v0.48.0 — Author Fuzzy-Match Scalability
+## v0.48.0 — Language Catalog Visibility
+
+**Status:** Done  
+**Goal:** Give users a way to inspect what languages an author's catalog
+actually contains before committing to a `language_filter`.  Without this,
+choosing the right filter is guesswork for authors who publish in multiple
+languages.
+
+### `GET /api/v1/authors/{id}/languages`
+
+**File:** `api/v1/authors.py`  
+**Response:** `list[{language: str | null, count: int}]` ordered by count
+descending.  `language` is `null` for book rows that pre-date this release.
+
+```json
+[
+  {"language": "en", "count": 47},
+  {"language": "de", "count": 6},
+  {"language": null, "count": 2}
+]
+```
+
+### `Book.language` column
+
+**Migration:** `0005_book_language` — adds `language TEXT` (nullable) to
+the `books` table.  
+**Population:** `core/scan.py` sets `language=book.get("language")` when
+creating a new `Book` row, and includes `"language"` in the COALESCE update
+path for existing rows.  All four metadata providers already returned this
+value in their result dicts; it was previously discarded.  Existing rows
+remain `NULL` until the author is re-scanned.
+
+### Note on `null` counts
+
+If re-scanning is not practical for the existing catalog, a one-off
+backfill query can populate reasonable defaults:
+```sql
+UPDATE books SET language = 'en' WHERE language IS NULL;
+```
+Not included as a migration step because the correct value is unknowable
+for older rows — let re-scans fill in the real data.
+
+---
+
+## v0.49.0 — Author Fuzzy-Match Scalability
 
 **Status:** Planned  
 **Goal:** Eliminate the O(n) full-table scan in `_get_or_create_author` step 3

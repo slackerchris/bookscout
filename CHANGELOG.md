@@ -1,5 +1,21 @@
 # BookScout Changelog
 
+## [0.48.0] - 2026-03-25
+
+### Added
+- **`GET /api/v1/authors/{id}/languages`** — returns a per-language count
+  breakdown (ISO 639-1 codes, ordered by count descending) for a given author's
+  catalog.  Useful for choosing an appropriate `language_filter` before
+  triggering a scan, particularly for authors who publish in multiple languages.
+  The `language` field is `null` for book rows that pre-date this release.
+- **`Book.language` column** — ISO 639-1 language code (e.g. `"en"`, `"de"`)
+  stored at scan time from the metadata source.  All four metadata providers
+  (OpenLibrary, Google Books, Audnexus, ISBNdb) already returned a `language`
+  key in their result dicts; this change persists it to the database.  Existing
+  rows are `NULL` until re-scanned.
+- **Migration `0005_book_language`** — adds `language TEXT` (nullable) to
+  the `books` table.
+
 ## [0.47.0] - 2026-03-25
 
 ### Added

@@ -76,9 +76,46 @@ class AuthorDetailOut(AuthorOut):
     owned_count: int = 0
 
 
+class LanguageCount(BaseModel):
+    language: str | None  # None means the book record pre-dates the language column
+    count: int
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@router.get(
+    "/{author_id}/languages",
+    response_model=list[LanguageCount],
+    summary="Language breakdown for an author's catalog",
+)
+async def list_author_languages(
+    author_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> list[LanguageCount]:
+    """Return a per-language count of books in this author's catalog, ordered
+    by count descending.  Useful for choosing an appropriate ``language_filter``
+    before triggering a scan.  The ``language`` field is ``null`` for book rows
+    that pre-date the v0.48.0 ``books.language`` column."""
+    await _get_or_404(session, author_id)
+
+    rows = await session.execute(
+        select(
+            Book.language,
+            func.count(Book.id).label("count"),
+        )
+        .join(BookAuthor, Book.id == BookAuthor.book_id)
+        .where(
+            BookAuthor.author_id == author_id,
+            BookAuthor.role == "author",
+            Book.deleted.is_(False),
+        )
+        .group_by(Book.language)
+        .order_by(func.count(Book.id).desc())
+    )
+    return [LanguageCount(language=r.language, count=r.count) for r in rows.all()]
+
 
 @router.get(
     "/{author_id}/coauthors",

@@ -77,6 +77,7 @@ class Book(Base):
     source          = Column(Text)
     cover_url       = Column(Text)
     description     = Column(Text)
+    language        = Column(Text)          # ISO 639-1 code, e.g. "en", "de"
     audio_format    = Column(Text)
     duration_seconds = Column(Integer)
     file_path       = Column(Text)

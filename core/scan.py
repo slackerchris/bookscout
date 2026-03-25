@@ -191,6 +191,7 @@ async def scan_author_by_id(
                 release_date=str(book.get("release_date") or "") or None,
                 published_year=published_year,
                 format=book.get("format"),
+                language=book.get("language"),
                 source=source_str,
                 cover_url=book.get("cover_url"),
                 description=book.get("description"),
@@ -256,6 +257,7 @@ async def scan_author_by_id(
                 ("asin", book.get("asin")),
                 ("isbn", book.get("isbn")),
                 ("isbn13", book.get("isbn13")),
+                ("language", book.get("language")),
             ):
                 if not getattr(existing, attr) and new_val:
                     setattr(existing, attr, new_val)
