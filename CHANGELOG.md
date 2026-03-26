@@ -1,5 +1,19 @@
 # BookScout Changelog
 
+## [0.50.3] - 2026-03-26
+
+### Fixed
+- **Confidence scoring inflated in author scans** — `score_books()` was passing
+  each book's own title as `search_title`, giving every book +50 for "exact title
+  match" against itself, and the ISBN bonus (+100) fired for any book that had an
+  identifier. Author scans now pass an empty `search_title` so only author-match
+  and multi-source signals contribute — wrong-author books from noisy API results
+  (e.g. a Terry Brooks "Landover" book returned when scanning Aleron Kong) now
+  score low instead of high.
+- **ISBN bonus gated on title search** — the +100 ISBN/ASIN presence bonus in
+  `score_book()` now only applies when a `search_title` is provided, since the
+  signal is only meaningful when looking for a specific book.
+
 ## [0.50.2] - 2026-03-26
 
 ### Fixed

@@ -215,9 +215,9 @@ def score_book(
             reasons.append(author_reason)
 
     # ------------------------------------------------------------------ #
-    # ISBN / ASIN match (strong signal)                                     #
+    # ISBN / ASIN match (strong signal — only meaningful for title search) #
     # ------------------------------------------------------------------ #
-    if book.get("isbn") or book.get("isbn13") or book.get("asin"):
+    if search_title and (book.get("isbn") or book.get("isbn13") or book.get("asin")):
         score += 100
         reasons.append("isbn_or_asin_present")
 
@@ -298,7 +298,14 @@ def score_books(
     want_audiobook: bool = False,
 ) -> list[dict]:
     """
-    Score and sort a list of merged books.
+    Score and sort a list of merged books for an author scan.
+
+    In an author scan there is no target title, so title-match and
+    ISBN-presence points are not awarded — those signals only make sense
+    when searching for a specific book.  Scoring is based on:
+      - Author match (exact/fuzzy)
+      - Number of independent sources that returned the book
+      - Bad-keyword / suspicious-edition penalties
 
     Each book dict is annotated in-place with:
       - score
@@ -310,7 +317,7 @@ def score_books(
     for book in books:
         result = score_book(
             book,
-            search_title=book.get("title", ""),
+            search_title="",       # no target title in an author scan
             search_author=search_author,
             want_audiobook=want_audiobook,
         )
