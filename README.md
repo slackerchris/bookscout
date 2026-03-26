@@ -122,7 +122,8 @@ All YAML keys can be overridden with environment variables: `DATABASE_URL`, `RED
 | `POST` | `/api/v1/authors` | Add author to watchlist |
 | `DELETE` | `/api/v1/authors/{id}` | Remove author |
 | `GET` | `/api/v1/authors/{id}/coauthors` | Co-authors discovered for an author |
-| `GET` | `/api/v1/books` | List books (filterable by author, confidence, owned) |
+| `GET` | `/api/v1/authors/{id}/languages` | Per-language book count breakdown |
+| `GET` | `/api/v1/books` | List books (filterable by author, confidence, owned, `updated_since`) |
 | `PATCH` | `/api/v1/books/{id}` | Update book metadata |
 | `POST` | `/api/v1/books/{id}/search` | Search indexers for a specific book |
 | `POST` | `/api/v1/scans/author/{id}` | Enqueue scan for one author |
