@@ -167,6 +167,13 @@ async def query_google_books(
         r = await client.get(GOOGLE_BOOKS_API, params=params, timeout=15)
         r.raise_for_status()
         data = r.json()
+    except httpx.HTTPStatusError as exc:
+        body = exc.response.text[:500]
+        logger.error(
+            "GoogleBooks HTTP error",
+            extra={"author": author_name, "status": exc.response.status_code, "body": body},
+        )
+        return []
     except Exception as exc:
         logger.error("GoogleBooks query failed", extra={"author": author_name, "error": str(exc)})
         return []

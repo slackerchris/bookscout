@@ -36,7 +36,7 @@ from core.metadata import (
     query_openlibrary,
     search_audible_metadata_direct,
 )
-from core.normalize import author_names_match, normalize_author_key, sort_name, sort_title
+from core.normalize import author_names_match, normalize_author_key, normalize_title_key, sort_name, sort_title
 from db.models import Author, AuthorAlias, Book, BookAuthor, Watchlist
 
 logger = logging.getLogger(__name__)
@@ -418,7 +418,10 @@ async def _find_existing_book(
                 is_cross = link_q.scalar_one_or_none() is None
                 return found, is_cross
 
-    # Phase 2: author-scoped title fallback; skip soft-deleted rows
+    # Phase 2: author-scoped title fallback; skip soft-deleted rows.
+    # Match by normalised title key so that "(Unabridged)" / verbose subtitle
+    # variants of the same book resolve to the same existing row.
+    tkey = normalize_title_key(book["title"])
     q = await session.execute(
         select(Book)
         .join(BookAuthor, Book.id == BookAuthor.book_id)
@@ -426,12 +429,14 @@ async def _find_existing_book(
             and_(
                 BookAuthor.author_id == author_id,
                 BookAuthor.role == "author",
-                Book.title == book["title"],
                 Book.deleted.is_(False),
             )
         )
     )
-    return q.scalar_one_or_none(), False
+    for candidate in q.scalars().all():
+        if normalize_title_key(candidate.title) == tkey:
+            return candidate, False
+    return None, False
 
 
 async def _get_or_create_author(session: AsyncSession, name: str) -> Author:

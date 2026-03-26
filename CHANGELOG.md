@@ -1,5 +1,12 @@
 # BookScout Changelog
 
+## [0.50.5] - 2026-03-26
+
+### Fixed
+- **Scan dedup phase 2** now uses `normalize_title_key()` instead of exact string
+  match, so "(Unabridged)" / verbose subtitle variants imported by ABS sync no
+  longer create duplicate rows when the metadata scan runs.
+
 ## [0.50.4] - 2026-03-26
 
 ### Added
