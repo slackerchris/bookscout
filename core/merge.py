@@ -6,12 +6,39 @@ from typing import Any
 from core.normalize import extract_series_from_title, normalize_title_key
 
 
+def _merge_into(existing: dict[str, Any], book: dict[str, Any]) -> None:
+    """Merge *book* fields into *existing* (coalesce missing fields, accumulate sources/authors)."""
+    for field in (
+        "subtitle", "isbn", "isbn13", "asin",
+        "cover_url", "description", "series", "series_position",
+    ):
+        if not existing.get(field) and book.get(field):
+            existing[field] = book[field]
+
+    new_src = book.get("source", [])
+    if isinstance(new_src, str):
+        new_src = [new_src] if new_src else []
+    for s in new_src:
+        if s and s not in existing["source"]:
+            existing["source"].append(s)
+
+    existing_authors: set[str] = set(existing.get("authors") or [])
+    for a in book.get("authors") or []:
+        existing_authors.add(a)
+    existing["authors"] = list(existing_authors)
+
+    # Prefer whichever record has a shorter (cleaner) title
+    if len(book.get("title", "")) < len(existing.get("title", "")):
+        existing["title"] = book["title"]
+
+
 def merge_books(books_lists: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
     """Deduplicate and merge books from multiple API result lists.
 
-    Deduplication priority: isbn13 > isbn > asin > normalised title.
-    When the same book appears in multiple sources, missing fields are filled
-    in from later matches and sources are accumulated into a list.
+    Pass 1 — identifier dedup: isbn13 > isbn > asin > normalised title.
+    Pass 2 — title dedup: group identifier-distinct editions of the same book
+    by normalised title and keep the best record (shortest/cleanest title,
+    with fields coalesced from all editions).
     """
     merged: dict[str, dict[str, Any]] = {}
 
@@ -41,25 +68,22 @@ def merge_books(books_lists: list[list[dict[str, Any]]]) -> list[dict[str, Any]]
                 book["source"] = [raw_src] if raw_src else []
                 merged[key] = book
             else:
-                existing = merged[key]
+                _merge_into(merged[key], book)
 
-                # Fill in fields missing from the first-seen record
-                for field in (
-                    "subtitle", "isbn", "isbn13", "asin",
-                    "cover_url", "description", "series", "series_position",
-                ):
-                    if not existing.get(field) and book.get(field):
-                        existing[field] = book[field]
+    # ------------------------------------------------------------------
+    # Pass 2: cross-identifier title dedup
+    # Different API sources often return different editions of the same book,
+    # each with a unique ISBN/ASIN but an equivalent normalised title (e.g.
+    # "God's Eye : Awakening", "God's Eye: Awakening: A Labyrinth World Novel",
+    # "God's Eye: Awakening: A Labyrinth World LitRPG Novel").  Collapse those
+    # into a single record, keeping the shortest/cleanest title.
+    # ------------------------------------------------------------------
+    by_title: dict[str, dict[str, Any]] = {}
+    for book in merged.values():
+        tkey = normalize_title_key(book["title"])
+        if tkey not in by_title:
+            by_title[tkey] = book
+        else:
+            _merge_into(by_title[tkey], book)
 
-                # Accumulate sources
-                new_src = book.get("source", "")
-                if new_src and new_src not in existing["source"]:
-                    existing["source"].append(new_src)
-
-                # Accumulate author names
-                existing_authors: set[str] = set(existing.get("authors") or [])
-                for a in book.get("authors") or []:
-                    existing_authors.add(a)
-                existing["authors"] = list(existing_authors)
-
-    return list(merged.values())
+    return list(by_title.values())

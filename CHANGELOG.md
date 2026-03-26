@@ -1,5 +1,15 @@
 # BookScout Changelog
 
+## [0.50.2] - 2026-03-26
+
+### Fixed
+- **Duplicate editions not collapsed** — `merge_books()` now runs a second
+  title-dedup pass after identifier dedup.  Different API editions of the same
+  book (each with a unique ISBN/ASIN but an equivalent normalised title, e.g.
+  `"God's Eye : Awakening"` / `"God's Eye: Awakening: A Labyrinth World Novel"`)
+  are collapsed into a single record.  The shortest/cleanest title is kept and
+  all fields are coalesced across editions.
+
 ## [0.50.1] - 2026-03-26
 
 ### Fixed
