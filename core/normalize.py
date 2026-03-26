@@ -5,6 +5,41 @@ import re
 
 _VOWELS = frozenset("aeiou")
 
+_PAREN_RE = re.compile(r"\s*\([^)]*\)")
+_ARTICLE_PREFIX_RE = re.compile(r"^(?:the|a|an)\s+", re.IGNORECASE)
+
+
+def normalize_title_key(title: str) -> str:
+    """Return a normalised dedup key for *title*.
+
+    Strips leading articles, parenthetical content (e.g. ``"(Chaos Seeds)"``),
+    and text after a second colon (verbose subtitles added by some APIs), then
+    strips all remaining punctuation and collapses whitespace.
+
+    This lets ``"The Land: Founding: A LitRPG Saga (Chaos Seeds) (Volume 1)"``
+    and ``"Land: Founding"`` produce the same key.
+    """
+    t = _PAREN_RE.sub("", title)
+    t = re.sub(r"\s*:\s*", ":", t)          # normalise spaces around colons
+    parts = t.split(":", 2)
+    t = ":".join(parts[:2])                  # keep at most main title + first subtitle
+    t = _ARTICLE_PREFIX_RE.sub("", t)
+    t = re.sub(r"[^a-z0-9\s]", "", t.lower())
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def abs_search_title(title: str) -> str:
+    """Return a simplified title suitable as an ABS full-text search query.
+
+    Strips parenthetical content and text after a second colon so that verbose
+    metadata API titles like ``"The Land: Founding: A LitRPG Saga (Chaos Seeds)
+    (Volume 1)"`` are shortened to ``"The Land: Founding"`` before querying ABS.
+    """
+    t = _PAREN_RE.sub("", title).strip()
+    t = re.sub(r"\s*:\s*", ": ", t)
+    parts = t.split(": ", 2)
+    return ": ".join(parts[:2]).strip()
+
 
 def normalize_author_name(name: str) -> str:
     """Lower-case, remove periods, collapse whitespace, strip common suffixes."""

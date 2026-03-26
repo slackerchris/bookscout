@@ -9,7 +9,7 @@ import re
 
 import httpx
 
-from core.normalize import normalize_author_name
+from core.normalize import abs_search_title, normalize_author_name
 
 # Matches role annotations appended to author names in ABS metadata, e.g.:
 #   "Christopher Tolkien - editor"
@@ -47,7 +47,12 @@ async def check_audiobookshelf(
         return False, None, None
 
     headers = {"Authorization": f"Bearer {abs_token}"}
-    normalized = book_title.lower().replace(":", "").replace(",", "").replace("-", " ").strip()
+    # Use a simplified title for both the ABS search query and word-overlap
+    # comparison.  Verbose metadata API titles like "The Land: Founding: A
+    # LitRPG Saga (Chaos Seeds) (Volume 1)" would otherwise produce a large
+    # word set that swamps the overlap ratio against ABS's shorter stored title.
+    query_title = abs_search_title(book_title)
+    normalized = query_title.lower().replace(":", "").replace(",", "").replace("-", " ").strip()
     title_words = set(normalized.split())
 
     try:
@@ -60,7 +65,7 @@ async def check_audiobookshelf(
         for library in libraries:
             sr = await client.get(
                 f"{abs_url}/api/libraries/{library['id']}/search",
-                params={"q": book_title},
+                params={"q": query_title},
                 headers=headers,
                 timeout=10,
             )
@@ -76,14 +81,16 @@ async def check_audiobookshelf(
                 abs_title = metadata.get("title", "").lower().strip()
 
                 matched = False
-                if book_title.lower() in abs_title or abs_title in book_title.lower():
+                if query_title.lower() in abs_title or abs_title in query_title.lower():
                     matched = True
                 else:
-                    # Fuzzy: ≥75 % word overlap
+                    # Fuzzy: ≥75 % word overlap — divide by the *shorter* word
+                    # set so a concise ABS title matches a longer metadata title.
                     abs_words = set(
                         abs_title.replace(":", "").replace(",", "").replace("-", " ").split()
                     )
-                    if title_words and len(title_words & abs_words) / len(title_words) >= 0.75:
+                    denom = min(len(title_words), len(abs_words)) if abs_words else 0
+                    if denom and len(title_words & abs_words) / denom >= 0.75:
                         matched = True
 
                 if matched:

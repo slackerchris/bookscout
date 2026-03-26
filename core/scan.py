@@ -539,6 +539,7 @@ async def _cached_query(
         cached = await redis_client.get(key)
         if cached is not None:
             logger.debug("Cache hit", extra={"key": key})
+            coro.close()  # prevent "coroutine was never awaited" warning
             return json.loads(cached)
     except Exception as exc:
         logger.warning("Cache read failed", extra={"key": key, "error": str(exc)})

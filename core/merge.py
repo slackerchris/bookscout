@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.normalize import extract_series_from_title
+from core.normalize import extract_series_from_title, normalize_title_key
 
 
 def merge_books(books_lists: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
@@ -33,7 +33,7 @@ def merge_books(books_lists: list[list[dict[str, Any]]]) -> list[dict[str, Any]]
             elif book.get("asin"):
                 key = f"asin:{book['asin']}"
             else:
-                key = f"title:{book['title'].lower().strip()}"
+                key = f"title:{normalize_title_key(book['title'])}"
 
             if key not in merged:
                 # Normalise source to a list immediately for consistent handling
