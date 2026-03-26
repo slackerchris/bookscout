@@ -1,5 +1,29 @@
 # BookScout Changelog
 
+## [0.50.1] - 2026-03-26
+
+### Fixed
+- **ABS ownership check — all books showing Missing** — `check_audiobookshelf()`
+  now strips parenthetical content and verbose subtitles from the title before
+  querying ABS (e.g. `"The Land: Founding: A LitRPG Saga (Chaos Seeds) (Volume 1)"`
+  → `"The Land: Founding"`).  The word-overlap ratio now divides by
+  `min(title_words, abs_words)` instead of `len(title_words)`, so a short ABS
+  title correctly matches a long metadata API title.
+- **Duplicate books in scan results** — the title-based merge dedup key now uses
+  `normalize_title_key()` which strips leading articles, parentheticals, and
+  text after a second colon.  Variants like `"The Land: Founding"`, `"Land:
+  Founding (Chaos Seeds) (Volume 1)"`, and `"The Land: Founding: A LitRPG Saga
+  (Chaos Seeds) (Volume 1)"` now merge into a single record.
+- **`coroutine was never awaited` warnings** — unawaited metadata coroutines are
+  now explicitly closed when a Redis cache hit is returned, eliminating
+  `RuntimeWarning` spam in the worker logs.
+
+### Added
+- **`normalize_title_key()`** (`core/normalize.py`) — normalised dedup key for
+  book titles; strips articles, parentheticals, and verbose subtitles.
+- **`abs_search_title()`** (`core/normalize.py`) — simplified title for ABS
+  search queries; keeps only the main title and first subtitle segment.
+
 ## [0.50.0] - 2026-03-26
 
 ### Added
