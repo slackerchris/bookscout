@@ -1,5 +1,20 @@
 # BookScout Changelog
 
+## [0.50.4] - 2026-03-26
+
+### Added
+- **`POST /api/v1/audiobookshelf/sync-books`** — walks every ABS library and
+  imports all owned books directly into the DB (`have_it=True`,
+  `match_method="audiobookshelf"`).  Captures title, author, series name,
+  series position, ASIN, and ISBN straight from ABS metadata so books like
+  "Alpha" that the metadata APIs miss are still tracked.  Creates author +
+  watchlist entries for any unknown authors.  After import, enqueues a
+  metadata scan for every affected author to backfill descriptions, cover
+  URLs, and confidence scores via the normal scan pipeline.
+- **`get_all_books_from_audiobookshelf()`** (`core/audiobookshelf.py`) — paginates
+  all ABS library items and returns structured book dicts with series/identifier
+  fields.
+
 ## [0.50.3] - 2026-03-26
 
 ### Fixed

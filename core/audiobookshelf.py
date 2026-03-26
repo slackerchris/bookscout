@@ -174,3 +174,80 @@ async def get_all_authors_from_audiobookshelf(
         logger.error("ABS authors fetch failed", extra={"error": str(exc)})
 
     return sorted(seen.values())
+
+
+async def get_all_books_from_audiobookshelf(
+    client: httpx.AsyncClient,
+    abs_url: str,
+    abs_token: str,
+) -> list[dict]:
+    """Return every book in all ABS libraries as a list of dicts.
+
+    Each dict contains:
+      title, author_name, series_name, series_position, asin, isbn, cover_url
+    """
+    if not abs_url or not abs_token:
+        return []
+
+    headers = {"Authorization": f"Bearer {abs_token}"}
+    books: list[dict] = []
+
+    try:
+        r = await client.get(f"{abs_url}/api/libraries", headers=headers, timeout=10)
+        if r.status_code != 200:
+            return []
+
+        for library in r.json().get("libraries", []):
+            # Only process book libraries, not podcast libraries
+            if library.get("mediaType") not in (None, "book"):
+                continue
+
+            page, limit, total_processed = 0, 100, 0
+            while True:
+                ir = await client.get(
+                    f"{abs_url}/api/libraries/{library['id']}/items",
+                    params={"limit": limit, "page": page},
+                    headers=headers,
+                    timeout=30,
+                )
+                if ir.status_code != 200:
+                    break
+
+                data = ir.json()
+                items: list[dict] = data.get("results", [])
+                if not items:
+                    break
+
+                for item in items:
+                    meta = item.get("media", {}).get("metadata", {})
+                    title = meta.get("title", "").strip()
+                    if not title:
+                        continue
+
+                    author_raw = meta.get("authorName", "").strip()
+                    # Strip role annotations from author names
+                    author_raw = _ROLE_SUFFIX_RE.sub("", author_raw).strip()
+
+                    series_list = meta.get("series", []) or []
+                    series_name = series_list[0].get("name") if series_list else None
+                    series_pos = series_list[0].get("sequence") if series_list else None
+
+                    books.append({
+                        "title": title,
+                        "author_name": author_raw or None,
+                        "series_name": series_name,
+                        "series_position": series_pos,
+                        "asin": meta.get("asin") or None,
+                        "isbn": meta.get("isbn") or None,
+                        "cover_url": item.get("media", {}).get("coverPath") or None,
+                    })
+
+                total_processed += len(items)
+                if total_processed >= data.get("total", 0):
+                    break
+                page += 1
+
+    except Exception as exc:
+        logger.error("ABS books fetch failed", extra={"error": str(exc)})
+
+    return books
