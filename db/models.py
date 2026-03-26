@@ -22,16 +22,21 @@ class Base(AsyncAttrs, DeclarativeBase):
 class Author(Base):
     __tablename__ = "authors"
 
-    id          = Column(Integer, primary_key=True)
-    name        = Column(Text, nullable=False)
-    name_sort   = Column(Text, nullable=False)      # "Sanderson, Brandon"
-    asin        = Column(Text, unique=True)
-    openlibrary_key = Column(Text, unique=True)
-    image_url   = Column(Text)
-    bio         = Column(Text)
-    active      = Column(Boolean, server_default="true", nullable=False)
-    created_at  = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
-    updated_at  = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    __table_args__ = (
+        Index("ix_authors_name_normalized", "name_normalized"),
+    )
+
+    id               = Column(Integer, primary_key=True)
+    name             = Column(Text, nullable=False)
+    name_sort        = Column(Text, nullable=False)      # "Sanderson, Brandon"
+    name_normalized  = Column(Text)                      # "jnchaney" — punctuation/case stripped (v0.50.0)
+    asin             = Column(Text, unique=True)
+    openlibrary_key  = Column(Text, unique=True)
+    image_url        = Column(Text)
+    bio              = Column(Text)
+    active           = Column(Boolean, server_default="true", nullable=False)
+    created_at       = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at       = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     book_authors    = relationship("BookAuthor", back_populates="author", cascade="all, delete-orphan")
     watchlist_entry = relationship("Watchlist",  back_populates="author", uselist=False, cascade="all, delete-orphan")

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.normalize import sort_name
+from core.normalize import normalize_author_key, sort_name
 from db.models import Author, AuthorAlias, Book, BookAuthor, Watchlist
 from db.session import get_session
 
@@ -209,7 +209,7 @@ async def create_author(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Author already exists")
 
-    author = Author(name=body.name, name_sort=sort_name(body.name))
+    author = Author(name=body.name, name_sort=sort_name(body.name), name_normalized=normalize_author_key(body.name))
     session.add(author)
     await session.flush()  # populate author.id
 

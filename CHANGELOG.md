@@ -1,5 +1,43 @@
 # BookScout Changelog
 
+## [0.50.0] - 2026-03-26
+
+### Added
+- **`Author.name_normalized` column + index** — new `TEXT` column on the
+  `authors` table storing a punctuation/case-stripped key (e.g. `"J.N. Chaney"`
+  → `"jnchaney"`).  Indexed via `ix_authors_name_normalized`.  Populated at
+  author creation time and backfilled for existing rows via migration `0006`.
+- **`normalize_author_key()` helper** (`core/normalize.py`) — single source of
+  truth for the normalisation transform used by both the SQL index and
+  `_cache_author_key()` in `core/scan.py`.
+
+### Changed
+- **`_get_or_create_author` step 3** — replaced the O(n) full-table Python scan
+  with a single indexed SQL lookup on `name_normalized`.  Covers
+  punctuation/spacing variants (e.g. `"J.N. Chaney"` ↔ `"J. N. Chaney"`)
+  without loading every author row.  A Python fuzzy-match fallback (step 3b)
+  is retained for initial-expansion variants not handled by the key equality
+  check (e.g. `"J.N."` ↔ `"John N."`); see v0.51.0 for the pg_trgm fix.
+- **Language filter — OpenLibrary** — OpenLibrary returns ISO 639-2 three-letter
+  codes (`"eng"`, `"kor"`).  The filter was comparing against two-letter codes
+  (`"en"`), so it never matched and returned zero books.  A new
+  `_LANG_639_2_TO_1` mapping normalises all codes to ISO 639-1 before
+  filtering.  When a book has multiple editions in different languages, the
+  matching language is stored as the primary rather than whichever OL listed
+  first.
+- **Language filter — Audnexus/ISBNdb** — books whose language cannot be
+  determined (Audnexus enrichment failed or book not in Audnexus, ISBNdb
+  record has no language field) now default to `None` instead of `"en"`.
+  When a language filter is active, `None`-language books are excluded rather
+  than assumed to be English, preventing non-English books from slipping
+  through when the enrichment call fails.
+
+### Migration
+- `0006_author_name_normalized` — adds `authors.name_normalized` (nullable
+  TEXT), backfills it from existing `name` values using
+  `regexp_replace(name, '[^a-zA-Z0-9]', '', 'g')`, and creates
+  `ix_authors_name_normalized`.
+
 ## [0.49.3] - 2026-03-25
 
 ### Fixed

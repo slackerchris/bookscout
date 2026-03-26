@@ -36,7 +36,7 @@ from core.metadata import (
     query_openlibrary,
     search_audible_metadata_direct,
 )
-from core.normalize import author_names_match, sort_name, sort_title
+from core.normalize import author_names_match, normalize_author_key, sort_name, sort_title
 from db.models import Author, AuthorAlias, Book, BookAuthor, Watchlist
 
 logger = logging.getLogger(__name__)
@@ -312,7 +312,7 @@ async def scan_author_by_id(
         if not on_watchlist:
             if auto_add_coauthors:
                 if not co_obj:
-                    co_obj = Author(name=co_name, name_sort=sort_name(co_name))
+                    co_obj = Author(name=co_name, name_sort=sort_name(co_name), name_normalized=normalize_author_key(co_name))
                     session.add(co_obj)
                     await session.flush()
                 session.add(Watchlist(author_id=co_obj.id))
@@ -455,16 +455,23 @@ async def _get_or_create_author(session: AsyncSession, name: str) -> Author:
         if author:
             return author
 
-    # 3. Fuzzy match against all existing authors to catch name variants not
-    #    yet in the aliases table (e.g. first time we see "Terry H. Maggert").
-    #
-    #    PERF NOTE: this is an O(n) full-table scan — acceptable up to ~200
-    #    authors, but becomes the throughput ceiling as the library grows.
-    #    The alias table (step 2) short-circuits this for every variant seen
-    #    after the first encounter, so the real-world hit rate drops over time.
-    #    A future fix would index a normalised name column (punctuation/case
-    #    stripped) and push the fuzzy comparison into a SQL WHERE clause,
-    #    eliminating the Python-side loop entirely.
+    # 3. Normalised-key lookup — single indexed SQL query covering punctuation
+    #    and spacing variants (e.g. "J.N. Chaney" ↔ "J. N. Chaney" both map
+    #    to "jnchaney").  Replaces the previous O(n) full-table scan for this
+    #    class of variants.
+    key = normalize_author_key(name)
+    norm_result = await session.execute(
+        select(Author).where(Author.name_normalized == key)
+    )
+    author = norm_result.scalar_one_or_none()
+    if author:
+        await _record_alias(session, author, name, "scan")
+        return author
+
+    # 3b. Full fuzzy-match fallback for initial-expansion variants not handled
+    #     by the normalised key (e.g. "J.N. Chaney" ↔ "John N. Chaney").
+    #     TODO v0.51.0: replace with pg_trgm trigram index to eliminate this
+    #     remaining O(n) scan path.
     all_result = await session.execute(select(Author))
     for existing in all_result.scalars():
         if author_names_match(name, existing.name):
@@ -473,7 +480,7 @@ async def _get_or_create_author(session: AsyncSession, name: str) -> Author:
 
     # 4. No match — create a new author row and seed its canonical name as
     #    the first alias.
-    author = Author(name=name, name_sort=sort_name(name))
+    author = Author(name=name, name_sort=sort_name(name), name_normalized=normalize_author_key(name))
     session.add(author)
     await session.flush()  # populate author.id
     await _record_alias(session, author, name, "scan")
@@ -509,7 +516,7 @@ def _parse_year(release_date: Any) -> int | None:
 
 def _cache_author_key(name: str) -> str:
     """Normalise an author name into a compact Redis key segment."""
-    return re.sub(r"[^a-z0-9]", "", name.lower())
+    return normalize_author_key(name)
 
 
 async def _cached_query(

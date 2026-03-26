@@ -82,7 +82,7 @@
 | 0.47.0 | Webhook retry with exponential backoff + dead endpoint detection | ✅ Done |
 | 0.48.0 | `GET /api/v1/authors/{id}/languages` — language catalog breakdown + `books.language` column | ✅ Done |
 | 0.49.0 | `GET /api/v1/books?updated_since=` — delta-poll filter for n8n / offline recovery | ✅ Done |
-| 0.50.0 | `_get_or_create_author` — normalised-name index + SQL fuzzy match | 📋 Planned |
+| 0.50.0 | `_get_or_create_author` — normalised-name index + SQL fuzzy match | ✅ Done |
 
 ---
 
@@ -422,7 +422,7 @@ This is complementary to webhooks: webhooks cover the real-time case;
 
 ## v0.50.0 — Author Fuzzy-Match Scalability
 
-**Status:** Planned  
+**Status:** Done  
 **Goal:** Eliminate the O(n) full-table scan in `_get_or_create_author` step 3
 so the function scales to 500+ authors without a throughput hit.
 
@@ -466,3 +466,43 @@ every truly new variant still pays the full scan cost once.
   handles the punctuation/spacing class of variants; a separate trigram index
   (pg_trgm) or application-level fallback may still be needed for initial
   expansion cases.
+
+---
+
+## v0.51.0 — Author Fuzzy-Match: Remaining O(n) Cases
+
+**Status:** Planned  
+**Goal:** Close the two known gaps left by the v0.50.0 normalised-key index.
+
+### Known Issue 1 — Normalisation Collision
+
+**Problem:** `normalize_author_key` strips *all* non-alphanumeric characters,
+so `"O'Brian"` and `"OBrian"` map to the same key (`"obrian"`).  Two distinct
+authors could be incorrectly merged.
+
+**Fix options:**
+- Validate against the live author corpus before the v0.51.0 release; log a
+  warning for any existing author whose `name_normalized` collides with another.
+- Consider a smarter normalisation that preserves apostrophes as a separator
+  (e.g. `"O'Brian"` → `"o brian"` → still distinct from `"obrian"`).
+- At minimum, add a uniqueness check at insert time and fall back to a new
+  row rather than silently merging on collision.
+
+### Known Issue 2 — Initial Expansion Not Covered by Normalised Key
+
+**Problem:** The step 3b Python fuzzy-match fallback in `_get_or_create_author`
+still performs an O(n) full-table scan for initial-expansion variants
+(e.g. `"J.N. Chaney"` ↔ `"John N. Chaney"`).  These are not caught by the
+normalised-key equality check because the keys differ (`"jnchaney"` vs
+`"johnchaney"`).
+
+**Fix:** Enable the PostgreSQL `pg_trgm` extension and add a trigram index on
+`authors.name_normalized`.  Replace the step 3b loop with a single SQL
+similarity query:
+```sql
+SELECT * FROM authors
+WHERE similarity(name_normalized, :key) > 0.6
+ORDER BY similarity(name_normalized, :key) DESC
+LIMIT 1;
+```
+This makes even the expansion case an indexed sub-linear lookup.

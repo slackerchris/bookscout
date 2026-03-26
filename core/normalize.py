@@ -127,3 +127,17 @@ def sort_title(title: str) -> str:
         if title.startswith(article):
             return title[len(article):] + ", " + article.strip()
     return title
+
+
+def normalize_author_key(name: str) -> str:
+    """Strip all non-alphanumeric characters and lowercase.
+
+    Used to populate ``Author.name_normalized`` and for indexed SQL lookups in
+    ``_get_or_create_author``.  Handles punctuation/spacing variants:
+    ``"J.N. Chaney"``, ``"J. N. Chaney"`` and ``"JN Chaney"`` all map to
+    ``"jnchaney"``.
+
+    Note — this does *not* handle initial expansion (``"J.N."`` ↔ ``"John N."``);
+    see TODO v0.51.0 for the pg_trgm fallback that covers that case.
+    """
+    return re.sub(r"[^a-z0-9]", "", name.lower())

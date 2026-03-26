@@ -22,6 +22,40 @@ AUDNEXUS_API = "https://api.audnex.us"
 AUDIBLE_CATALOG_API = "https://api.audible.com/1.0/catalog/products"
 ISBNDB_API = "https://api2.isbndb.com"
 
+# OpenLibrary returns ISO 639-2 (3-letter) codes; normalise to ISO 639-1 (2-letter)
+# so all sources share the same code convention used by language_filter.
+_LANG_639_2_TO_1: dict[str, str] = {
+    "eng": "en",
+    "ger": "de",
+    "deu": "de",
+    "fre": "fr",
+    "fra": "fr",
+    "spa": "es",
+    "por": "pt",
+    "ita": "it",
+    "dut": "nl",
+    "nld": "nl",
+    "pol": "pl",
+    "rus": "ru",
+    "jpn": "ja",
+    "chi": "zh",
+    "zho": "zh",
+    "kor": "ko",
+    "swe": "sv",
+    "dan": "da",
+    "nor": "no",
+    "fin": "fi",
+    "cze": "cs",
+    "ces": "cs",
+    "hun": "hu",
+    "rum": "ro",
+    "ron": "ro",
+    "tur": "tr",
+    "ara": "ar",
+    "heb": "he",
+    "hin": "hi",
+}
+
 # Audnexus returns full language names; normalise to ISO 639-1 codes to match
 # the language_filter convention used by OpenLibrary and Google Books.
 _LANG_NAME_TO_ISO: dict[str, str] = {
@@ -74,13 +108,22 @@ async def query_openlibrary(
         ):
             continue
 
-        book_languages: list[str] = doc.get("language", ["en"])
+        # OpenLibrary uses ISO 639-2 (3-letter) codes; normalise to ISO 639-1.
+        # OL rolls up all editions so a book may list multiple languages.
+        raw_languages: list[str] = doc.get("language", [])
+        book_languages: list[str] = [_LANG_639_2_TO_1.get(c, c) for c in raw_languages]
         if (
             language_filter
             and language_filter != "all"
             and language_filter not in book_languages
         ):
             continue
+        # If filtering by a specific language and the book matched, store that
+        # language (not whichever OL happened to list first).
+        if language_filter and language_filter != "all" and language_filter in book_languages:
+            primary_language = language_filter
+        else:
+            primary_language = book_languages[0] if book_languages else None
 
         isbn_list: list[str] = doc.get("isbn") or []
         book: dict[str, Any] = {
@@ -94,7 +137,7 @@ async def query_openlibrary(
                 if doc.get("cover_i")
                 else None
             ),
-            "language": book_languages[0] if book_languages else "en",
+            "language": primary_language,
             "source": "OpenLibrary",
             "authors": author_names,
         }
@@ -263,7 +306,7 @@ async def query_audnexus(
             "release_date": None,
             "cover_url": None,
             "format": "audiobook",
-            "language": "en",  # overwritten by Audnexus detail if available
+            "language": None,  # overwritten by Audnexus detail; None = unknown
             "source": "Audnexus",
             "authors": product_authors or [author_name],
             "series": primary.get("title") if primary else None,
@@ -295,7 +338,9 @@ async def query_audnexus(
             except Exception:
                 pass
 
-        # Apply language filter (post-enrichment, since Audible API has no lang filter)
+        # Apply language filter (post-enrichment, since Audible API has no lang filter).
+        # Books whose language is still None (Audnexus lookup failed / not in Audnexus)
+        # are excluded when a filter is active rather than assumed to be English.
         if language_filter and language_filter != "all":
             if book["language"] != language_filter:
                 return None
@@ -335,7 +380,9 @@ async def query_isbndb(
 
     books: list[dict[str, Any]] = []
     for item in data.get("books", []):
-        lang = item.get("language", "en")
+        lang = item.get("language") or None
+        # Exclude books with unknown language when a filter is active rather than
+        # assuming English.
         if language_filter and language_filter != "all" and lang != language_filter:
             continue
         title = item.get("title", "")
