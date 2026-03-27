@@ -1,5 +1,21 @@
 # BookScout Changelog
 
+## [0.50.13] - 2026-03-26
+
+### Fixed
+- **Non-English Audible books slipping through language filter** — Root cause
+  found: the Audible catalog API only returns the `language` field when
+  `media` is included in `response_groups`. Without it every product came
+  back with no language, so the filter had nothing to act on and fell through
+  to the Audnexus per-ASIN enrichment step which could time out leaving
+  `language=null`. Fix: added `media` to `response_groups`; Polish/German/etc.
+  editions are now filtered out in the catalog page loop before any Audnexus
+  enrichment is attempted. The catalog language is also stored on the book
+  dict as an immediate fallback so the post-enrichment filter always has a
+  value to check even if Audnexus times out.
+
+---
+
 ## [0.50.12] - 2026-03-26
 
 ### Fixed

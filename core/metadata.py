@@ -257,7 +257,7 @@ async def query_audnexus(
                     "num_results": per_page,
                     "page": page,
                     "products_sort_by": "Relevance",
-                    "response_groups": "product_desc,contributors,series",
+                    "response_groups": "product_desc,contributors,series,media",
                 },
                 timeout=15,
             )
@@ -279,6 +279,14 @@ async def query_audnexus(
                 author_names_match(author_name, a) for a in product_authors
             ):
                 continue
+            # Filter by language early using the catalog-level field (requires
+            # the 'media' response_group).  Audible returns full names like
+            # 'english', 'polish', 'german' — normalise and compare.
+            if language_filter and language_filter != "all":
+                raw_lang = (product.get("language") or "").lower()
+                product_lang = _LANG_NAME_TO_ISO.get(raw_lang, raw_lang) if raw_lang else None
+                if product_lang and product_lang != language_filter:
+                    continue
             all_products.append(product)
 
         if (page + 1) * per_page >= data.get("total_results", 0):
@@ -310,6 +318,11 @@ async def query_audnexus(
             series_list[0] if series_list else None,
         )
 
+        # Seed language from the catalog 'media' response_group so the
+        # post-enrichment filter has a value even if Audnexus lookup fails.
+        catalog_lang_raw = (product.get("language") or "").lower()
+        catalog_lang = _LANG_NAME_TO_ISO.get(catalog_lang_raw, catalog_lang_raw) if catalog_lang_raw else None
+
         book: dict[str, Any] = {
             "title": title,
             "subtitle": product.get("subtitle", ""),
@@ -317,7 +330,7 @@ async def query_audnexus(
             "release_date": None,
             "cover_url": None,
             "format": "audiobook",
-            "language": None,  # overwritten by Audnexus detail; None = unknown
+            "language": catalog_lang,  # overwritten by Audnexus detail if available
             "source": "Audnexus",
             "authors": product_authors or [author_name],
             "narrators": product_narrators,
