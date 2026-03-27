@@ -1,5 +1,50 @@
 # BookScout Changelog
 
+## [0.50.8] - 2026-03-26
+
+### Fixed
+- **Search — audiobook category filter** — Prowlarr queries now use
+  `categories=[3030]` (Newznab audiobook) instead of the generic `type=book`
+  endpoint; Jackett queries pass `Category[]=3030` so results are scoped to
+  audiobook indexers only, eliminating unrelated results.
+
+---
+
+## [0.50.7] - 2026-03-26
+
+### Fixed
+- **Author table bloat** — `_get_or_create_author` was creating DB rows for
+  every name in the `authors` field returned by OpenLibrary and Google Books,
+  which includes translators, editors, illustrators, foreword writers and
+  narrators. This caused the author table to grow to 3500+ rows when only ~370
+  were real tracked authors.
+- **Contributor-role filter** (`_is_contributor_only`) — new filter in
+  `core/scan.py` rejects names encoding a non-author role before they reach
+  the DB. Catches: dash/paren role suffixes (`"Frog Jones - editor"`,
+  `"Alan Tepper - Übersetzer"`), plain-space suffixes (`"Grover Gardner
+  narrator"`), `"Read by …"` / `"Narrated by …"` prefixes, comma-separated
+  narrator group credits (`"Scott Aiello, Marc Vietor, Tavia Gilbert"`), and
+  known noise strings (`"et al"`, `"A Full Cast"`, `"Various Authors"`, etc.).
+  Covers English, German (`Übersetzer`), French (`traducteur`), Italian
+  (`traduttore`), Spanish (`traductor`) and Portuguese (`tradutor`) role words.
+- **`auto_add_coauthors=false` now actually prevents Author row creation** —
+  previously the flag only controlled Watchlist entries; co-author names still
+  silently created Author rows via `_get_or_create_author`. A new
+  `_find_author()` function (lookup-only, never inserts) is used instead when
+  the flag is off.
+- **Narrators separated from authors** — narrator names are now stored in a
+  dedicated `books.narrator` TEXT column (comma-joined string) and never
+  written to the authors table. Extracted from the Audible/Audnexus API
+  `narrators` array; merged and deduplicated across sources. Exposed in
+  `BookOut` API response.
+- **`import-authors` and `sync-books` ABS endpoints** now apply the same
+  `_is_contributor_only` filter so a clean re-import from Audiobookshelf does
+  not recreate junk rows. `import-authors` also now sets `name_normalized` on
+  newly created Author rows (was previously missing).
+
+### Added
+- **Migration `0007_book_narrator`** — `ALTER TABLE books ADD COLUMN narrator TEXT`.
+
 ## [0.50.6] - 2026-03-26
 
 ### Fixed

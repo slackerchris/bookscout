@@ -41,6 +41,72 @@ from db.models import Author, AuthorAlias, Book, BookAuthor, Watchlist
 
 logger = logging.getLogger(__name__)
 
+# Role-suffix pattern: strips annotations added by APIs like OpenLibrary/Google Books
+# that encode contributor roles in the name string, e.g.
+#   "Alan Tepper - Übersetzer"  (German: translator)
+#   "Frog Jones - editor"
+#   "S. T. Joshi - foreword"
+#   "Grover Gardner narrator"  (space-separated, no dash/paren)
+#   "Alexandre Dayet - traducteur"  (French: translator)
+#   "Stefano Andrea Cresti - traduttore"  (Italian: translator)
+#   "Isabel Murillo - translator"  (Spanish/generic)
+_CONTRIBUTOR_ROLE_RE = re.compile(
+    r"(?:\s*[-–(]\s*|\s+)"          # separator: dash/paren OR plain space
+    r"(?:"
+    r"editor|narrator|narrators|author|translator|illustrator|foreword|afterword"
+    r"|introduction|contributor|undifferentiated"
+    r"|traducteur|tarducteur"        # French
+    r"|traduttore|traduttrice"       # Italian
+    r"|traductor|traducción"         # Spanish
+    r"|übersetzer"                   # German
+    r"|tradutor|tradução"            # Portuguese
+    r"|tarductor"
+    r")\s*\)?$",                     # must appear at the END of the string
+    re.IGNORECASE,
+)
+
+# Names starting with these prefixes are narrator credits, not author names.
+_NARRATOR_PREFIX_RE = re.compile(
+    r"^(?:read\s+by|narrated\s+by|performed\s+by)\b",
+    re.IGNORECASE,
+)
+
+# A comma inside a name string almost always means it's a narrator credit
+# listing multiple people (e.g. "Scott Aiello, Marc Vietor, Tavia Gilbert").
+# Real author names never contain commas in this context.
+_MULTI_PERSON_RE = re.compile(r",")
+
+# Known noise strings that appear as author names in API data but are not real authors.
+_NOISE_AUTHORS: frozenset[str] = frozenset({
+    "et al", "et al.",
+    "a full cast", "full cast",
+    "various", "various authors", "various artists", "varios autores",
+    "aa. vv.", "aa vv", "aavv",
+    "unknown", "unknown author",
+    "multiple authors", "multiple narrators", "narrators", "others",
+    "audible sleep",
+    "tbd",
+})
+
+
+def _is_contributor_only(name: str) -> bool:
+    """Return True if *name* encodes a non-primary-author role.
+
+    Catches:
+    - Role-suffixed names: "Frog Jones - editor", "Grover Gardner narrator"
+    - "Read by …" / "Narrated by …" prefix credits
+    - Comma-separated multi-person strings (narrator group credits)
+    - Known noise strings like "et al", "A Full Cast", etc.
+    """
+    stripped = name.strip()
+    if stripped.lower() in _NOISE_AUTHORS:
+        return True
+    if _NARRATOR_PREFIX_RE.match(stripped):
+        return True
+    if _MULTI_PERSON_RE.search(stripped):
+        return True
+    return bool(_CONTRIBUTOR_ROLE_RE.search(stripped))
+
 
 async def scan_author_by_id(
     session: AsyncSession,
@@ -173,9 +239,16 @@ async def scan_author_by_id(
         source_str = json.dumps(source_val) if isinstance(source_val, list) else (source_val or "")
         score_reasons_str = json.dumps(book.get("score_reasons") or [])
         have_it_bool = bool(book.get("have_it", False))
+        # Build narrator string from the narrators list (never touches Author table)
+        narrator_names: list[str] = [
+            n for n in (book.get("narrators") or [])
+            if n and not _is_contributor_only(n)
+        ]
+        narrator_str: str | None = ", ".join(narrator_names) if narrator_names else None
         co_authors = [
             a for a in (book.get("authors") or [])
             if not author_names_match(author_name, a)
+            and not _is_contributor_only(a)
         ]
         all_scan_co_names.update(co_authors)
         published_year = _parse_year(book.get("release_date"))
@@ -197,6 +270,7 @@ async def scan_author_by_id(
                 description=book.get("description"),
                 series_name=book.get("series"),
                 series_position=book.get("series_position"),
+                narrator=narrator_str,
                 have_it=have_it_bool,
                 score=book.get("score", 0),
                 confidence_band=book.get("confidence_band", "low"),
@@ -210,12 +284,17 @@ async def scan_author_by_id(
             session.add(
                 BookAuthor(book_id=new_book.id, author_id=author_id, role="author")
             )
-            # Co-author links
+            # Co-author links — only create Author rows when auto_add_coauthors
+            # is enabled; otherwise link only already-tracked authors.
             for co_name in co_authors:
-                co_author = await _get_or_create_author(session, co_name)
-                session.add(
-                    BookAuthor(book_id=new_book.id, author_id=co_author.id, role="co-author")
-                )
+                if auto_add_coauthors:
+                    co_author = await _get_or_create_author(session, co_name)
+                else:
+                    co_author = await _find_author(session, co_name)
+                if co_author:
+                    session.add(
+                        BookAuthor(book_id=new_book.id, author_id=co_author.id, role="co-author")
+                    )
 
             new_books += 1
             if book.get("confidence_band") in ("high", "medium") or have_it_bool:
@@ -258,6 +337,7 @@ async def scan_author_by_id(
                 ("isbn", book.get("isbn")),
                 ("isbn13", book.get("isbn13")),
                 ("language", book.get("language")),
+                ("narrator", narrator_str),
             ):
                 if not getattr(existing, attr) and new_val:
                     setattr(existing, attr, new_val)
@@ -279,12 +359,16 @@ async def scan_author_by_id(
             existing_co_ids: set[int] = {row[0] for row in existing_co_result.fetchall()}
             fresh_co_ids: set[int] = set()
             for co_name in co_authors:
-                co_author = await _get_or_create_author(session, co_name)
-                fresh_co_ids.add(co_author.id)
-                if co_author.id not in existing_co_ids:
-                    session.add(
-                        BookAuthor(book_id=existing.id, author_id=co_author.id, role="co-author")
-                    )
+                if auto_add_coauthors:
+                    co_author = await _get_or_create_author(session, co_name)
+                else:
+                    co_author = await _find_author(session, co_name)
+                if co_author:
+                    fresh_co_ids.add(co_author.id)
+                    if co_author.id not in existing_co_ids:
+                        session.add(
+                            BookAuthor(book_id=existing.id, author_id=co_author.id, role="co-author")
+                        )
             for stale_id in existing_co_ids - fresh_co_ids:
                 await session.execute(
                     delete(BookAuthor).where(
@@ -437,6 +521,50 @@ async def _find_existing_book(
         if normalize_title_key(candidate.title) == tkey:
             return candidate, False
     return None, False
+
+
+async def _find_author(session: AsyncSession, name: str) -> Author | None:
+    """Look up an existing Author by name (exact → alias → normalised key → fuzzy).
+
+    Unlike ``_get_or_create_author``, this never inserts a new row.  Used when
+    ``auto_add_coauthors`` is False so that co-author names from API data do
+    not silently populate the authors table.
+    """
+    # 1. Exact match
+    result = await session.execute(select(Author).where(Author.name == name))
+    author = result.scalar_one_or_none()
+    if author:
+        return author
+
+    # 2. Alias table
+    alias_q = await session.execute(
+        select(AuthorAlias).where(AuthorAlias.alias == name)
+    )
+    alias_row = alias_q.scalar_one_or_none()
+    if alias_row:
+        author_q = await session.execute(
+            select(Author).where(Author.id == alias_row.author_id)
+        )
+        author = author_q.scalar_one_or_none()
+        if author:
+            return author
+
+    # 3. Normalised-key index
+    key = normalize_author_key(name)
+    norm_result = await session.execute(
+        select(Author).where(Author.name_normalized == key)
+    )
+    author = norm_result.scalar_one_or_none()
+    if author:
+        return author
+
+    # 3b. Fuzzy fallback
+    all_result = await session.execute(select(Author))
+    for existing in all_result.scalars():
+        if author_names_match(name, existing.name):
+            return existing
+
+    return None
 
 
 async def _get_or_create_author(session: AsyncSession, name: str) -> Author:

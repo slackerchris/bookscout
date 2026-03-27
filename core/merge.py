@@ -10,7 +10,7 @@ def _merge_into(existing: dict[str, Any], book: dict[str, Any]) -> None:
     """Merge *book* fields into *existing* (coalesce missing fields, accumulate sources/authors)."""
     for field in (
         "subtitle", "isbn", "isbn13", "asin",
-        "cover_url", "description", "series", "series_position",
+        "cover_url", "description", "series", "series_position", "narrator",
     ):
         if not existing.get(field) and book.get(field):
             existing[field] = book[field]
@@ -26,6 +26,13 @@ def _merge_into(existing: dict[str, Any], book: dict[str, Any]) -> None:
     for a in book.get("authors") or []:
         existing_authors.add(a)
     existing["authors"] = list(existing_authors)
+
+    # Merge narrator lists (deduplicated, preserving order from each source)
+    existing_narrators: list[str] = existing.get("narrators") or []
+    for n in book.get("narrators") or []:
+        if n not in existing_narrators:
+            existing_narrators.append(n)
+    existing["narrators"] = existing_narrators
 
     # Prefer whichever record has a shorter (cleaner) title
     if len(book.get("title", "")) < len(existing.get("title", "")):

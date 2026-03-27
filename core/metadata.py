@@ -299,6 +299,10 @@ async def query_audnexus(
         product_authors = [
             a.get("name", "") for a in (product.get("authors") or [])
         ]
+        product_narrators = [
+            n.get("name", "") for n in (product.get("narrators") or [])
+            if n.get("name")
+        ]
         series_list: list[dict] = product.get("series") or []
         # Prefer a series entry that carries a sequence number
         primary = next(
@@ -316,6 +320,7 @@ async def query_audnexus(
             "language": None,  # overwritten by Audnexus detail; None = unknown
             "source": "Audnexus",
             "authors": product_authors or [author_name],
+            "narrators": product_narrators,
             "series": primary.get("title") if primary else None,
             "series_position": primary.get("sequence") if primary else None,
         }
@@ -342,6 +347,13 @@ async def query_audnexus(
                     if sp:
                         book["series"] = sp.get("name")
                         book["series_position"] = sp.get("position")
+                    # Audnexus narrator list (overrides Audible's if present)
+                    detail_narrators = [
+                        n.get("name", "") for n in (detail.get("narrators") or [])
+                        if n.get("name")
+                    ]
+                    if detail_narrators:
+                        book["narrators"] = detail_narrators
             except Exception:
                 pass
 

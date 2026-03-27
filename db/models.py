@@ -88,6 +88,7 @@ class Book(Base):
     cover_url       = Column(Text)
     description     = Column(Text)
     language        = Column(Text)          # ISO 639-1 code, e.g. "en", "de"
+    narrator        = Column(Text)          # plain-text narrator credit(s), e.g. "Ray Porter" or "Ray Porter, Julia Whelan"
     audio_format    = Column(Text)
     duration_seconds = Column(Integer)
     file_path       = Column(Text)

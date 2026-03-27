@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import get_config
 from core.audiobookshelf import get_all_authors_from_audiobookshelf, get_all_books_from_audiobookshelf
 from core.normalize import author_names_match, normalize_author_key, normalize_title_key, sort_name, sort_title
+from core.scan import _is_contributor_only
 from db.models import Author, Book, BookAuthor, Watchlist
 from db.session import get_session
 
@@ -36,9 +37,11 @@ async def import_authors(session: AsyncSession = Depends(get_session)) -> dict:
 
     added = 0
     for name in author_names:
+        if _is_contributor_only(name):
+            continue
         if any(author_names_match(name, ex) for ex in existing_names):
             continue
-        author = Author(name=name, name_sort=sort_name(name))
+        author = Author(name=name, name_sort=sort_name(name), name_normalized=normalize_author_key(name))
         session.add(author)
         await session.flush()
         session.add(Watchlist(author_id=author.id))
@@ -95,7 +98,7 @@ async def sync_books(
     for item in abs_books:
         title: str = item["title"]
         author_name: str | None = item["author_name"]
-        if not author_name:
+        if not author_name or _is_contributor_only(author_name):
             continue
 
         # ---- find or create the author --------------------------------

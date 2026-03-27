@@ -37,6 +37,7 @@ class BookOut(BaseModel):
     source: str | None = None
     cover_url: str | None = None
     description: str | None = None
+    narrator: str | None = None
     score: int
     confidence_band: str
     have_it: bool
