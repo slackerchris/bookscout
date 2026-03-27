@@ -222,6 +222,18 @@ def score_book(
         reasons.append("isbn_or_asin_present")
 
     # ------------------------------------------------------------------ #
+    # Identifier bonus in author-scan mode (no search_title)               #
+    # An ASIN confirms a real Audible product; an ISBN a real print edition #
+    # ------------------------------------------------------------------ #
+    if not search_title:
+        if book.get("asin"):
+            score += 40
+            reasons.append("asin_present")
+        elif book.get("isbn") or book.get("isbn13"):
+            score += 20
+            reasons.append("isbn_present")
+
+    # ------------------------------------------------------------------ #
     # Publication year                                                      #
     # ------------------------------------------------------------------ #
     if reference_year:
@@ -319,7 +331,7 @@ def score_books(
             book,
             search_title="",       # no target title in an author scan
             search_author=search_author,
-            want_audiobook=want_audiobook,
+            want_audiobook=True,   # BookScout always tracks audiobooks
         )
         book["score"] = result["score"]
         book["confidence_band"] = result["confidence_band"]

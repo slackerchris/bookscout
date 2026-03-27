@@ -1,5 +1,19 @@
 # BookScout Changelog
 
+## [0.50.12] - 2026-03-26
+
+### Fixed
+- **Confidence scores always Low** — Author-scan mode was scoring a maximum of
+  75 points (author match + 3 sources) so nothing ever reached HIGH (≥100).
+  Two root causes fixed:
+  - Added an identifier bonus in author-scan mode: ASIN present `+40`
+    (confirmed Audible product), ISBN present `+20`.  A single-source Audnexus
+    book now scores author(40) + ASIN(40) + audiobook(20) = 100 → HIGH.
+  - `score_books()` now always passes `want_audiobook=True`; BookScout is an
+    audiobook tracker so the +20 audiobook format bonus should always apply.
+
+---
+
 ## [0.50.11] - 2026-03-26
 
 ### Fixed
