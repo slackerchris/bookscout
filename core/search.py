@@ -25,7 +25,7 @@ async def search_prowlarr(
     try:
         r = await client.get(
             f"{prowlarr_url}/api/v1/search",
-            params={"query": query, "type": "search", "categories": [3030]},
+            params={"query": query, "type": "search", "categories": [7000]},
             headers={"X-Api-Key": api_key},
             timeout=30,
         )
@@ -62,7 +62,7 @@ async def search_jackett(
     try:
         r = await client.get(
             f"{jackett_url}/api/v2.0/indexers/all/results",
-            params={"apikey": api_key, "Query": query, "Category[]": [3030]},
+            params={"apikey": api_key, "Query": query, "Category[]": [7000]},
             timeout=30,
         )
         if r.status_code != 200:

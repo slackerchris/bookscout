@@ -1,5 +1,13 @@
 # BookScout Changelog
 
+## [0.50.10] - 2026-03-26
+
+### Changed
+- **Search category** — Indexer queries now use Newznab category `7000` (Books)
+  instead of `3030` (Audio/Audiobook).
+
+---
+
 ## [0.50.9] - 2026-03-26
 
 ### Fixed
