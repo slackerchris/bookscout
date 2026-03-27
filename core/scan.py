@@ -286,12 +286,14 @@ async def scan_author_by_id(
             )
             # Co-author links — only create Author rows when auto_add_coauthors
             # is enabled; otherwise link only already-tracked authors.
+            new_book_co_ids: set[int] = set()
             for co_name in co_authors:
                 if auto_add_coauthors:
                     co_author = await _get_or_create_author(session, co_name)
                 else:
                     co_author = await _find_author(session, co_name)
-                if co_author:
+                if co_author and co_author.id not in new_book_co_ids:
+                    new_book_co_ids.add(co_author.id)
                     session.add(
                         BookAuthor(book_id=new_book.id, author_id=co_author.id, role="co-author")
                     )
@@ -364,11 +366,11 @@ async def scan_author_by_id(
                 else:
                     co_author = await _find_author(session, co_name)
                 if co_author:
-                    fresh_co_ids.add(co_author.id)
-                    if co_author.id not in existing_co_ids:
+                    if co_author.id not in existing_co_ids and co_author.id not in fresh_co_ids:
                         session.add(
                             BookAuthor(book_id=existing.id, author_id=co_author.id, role="co-author")
                         )
+                    fresh_co_ids.add(co_author.id)
             for stale_id in existing_co_ids - fresh_co_ids:
                 await session.execute(
                     delete(BookAuthor).where(

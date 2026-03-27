@@ -1,5 +1,27 @@
 # BookScout Changelog
 
+## [0.60.0] - 2026-03-27
+
+### Fixed
+- **Duplicate co-author `BookAuthor` inserts crashing scans** — When the same
+  co-author name appeared more than once in a book's `authors` list (e.g.,
+  returned by two different metadata sources), the scan would add two
+  `BookAuthor(book_id, author_id, role='co-author')` objects to the session.
+  The first was flushed successfully; the second caused a
+  `UniqueViolationError` on `uq_book_author_role` when a later autoflush fired,
+  crashing the entire scan task.  Two fixes applied:
+  - **New-book path**: added a `new_book_co_ids` set that guards
+    `session.add(BookAuthor(...))` so the same author_id is never linked twice
+    to the same new book.
+  - **Update-book path**: moved `fresh_co_ids.add(co_author.id)` *after* the
+    insert guard and extended the condition to
+    `co_author.id not in existing_co_ids and co_author.id not in fresh_co_ids`,
+    preventing a second insert when the same co-author resolves twice within
+    the same reconciliation loop.  `fresh_co_ids` is still fully populated
+    for the stale-link cleanup that follows.
+
+---
+
 ## [0.50.16] - 2026-03-26
 
 ### Added
