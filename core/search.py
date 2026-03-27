@@ -25,7 +25,7 @@ async def search_prowlarr(
     try:
         r = await client.get(
             f"{prowlarr_url}/api/v1/search",
-            params={"query": query, "type": "search", "categories": [3030]},
+            params={"query": query, "type": "search", "categories": [3030], "protocol": "torrent"},
             headers={"X-Api-Key": api_key},
             timeout=30,
         )

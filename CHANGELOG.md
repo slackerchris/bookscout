@@ -1,5 +1,14 @@
 # BookScout Changelog
 
+## [0.50.15] - 2026-03-26
+
+### Fixed
+- **Prowlarr search restricted to torrent indexers** — Added `protocol=torrent`
+  to Prowlarr search params so only torrent indexers are queried (matching the
+  Audio/Audiobook + Torrent filter shown in the Prowlarr UI).
+
+---
+
 ## [0.50.14] - 2026-03-26
 
 ### Fixed
