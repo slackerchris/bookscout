@@ -37,6 +37,7 @@ _DEFAULT: dict = {
             "username": "",
             "password": "",
             "default_category": "",
+            "default_tag": "",
             "save_path": "",
         },
     },
@@ -127,6 +128,8 @@ def _apply_env_overrides(data: dict) -> dict:
         data["download"]["torrent"]["default_category"] = v
     if v := env.get("TORRENT_SAVE_PATH"):
         data["download"]["torrent"]["save_path"] = v
+    if v := env.get("TORRENT_TAG"):
+        data["download"]["torrent"]["default_tag"] = v
     if v := env.get("POSTPROCESS_MODE"):
         data["postprocess"]["mode"] = v
     if v := env.get("POSTPROCESS_LIBRARY_ROOT"):

@@ -177,6 +177,7 @@ async def send_to_torrent_client(
     username: str = "",
     password: str = "",
     category: str = "",
+    tag: str = "",
     save_path: str = "",
     book_id: int = 0,
 ) -> dict[str, Any]:
@@ -198,7 +199,7 @@ async def send_to_torrent_client(
     if client_type == "qbittorrent":
         return await _send_qbittorrent(
             client, download_url, client_url, username, password,
-            category=category, save_path=save_path, book_id=book_id,
+            category=category, tag=tag, save_path=save_path, book_id=book_id,
         )
     if client_type == "transmission":
         return await _send_transmission(
@@ -216,6 +217,7 @@ async def _send_qbittorrent(
     username: str,
     password: str,
     category: str = "",
+    tag: str = "",
     save_path: str = "",
     book_id: int = 0,
 ) -> dict[str, Any]:
@@ -232,8 +234,9 @@ async def _send_qbittorrent(
             payload["savepath"] = save_path
         elif category:
             payload["category"] = category
-        if book_id:
-            payload["tags"] = f"bookscout-{book_id}"
+        tag_parts = [p for p in [tag, f"bookscout-{book_id}" if book_id else ""] if p]
+        if tag_parts:
+            payload["tags"] = ",".join(tag_parts)
         r = await client.post(
             f"{qbt_url}/api/v2/torrents/add",
             data=payload,

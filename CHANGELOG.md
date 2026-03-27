@@ -1,5 +1,16 @@
 # BookScout Changelog
 
+## [0.50.16] - 2026-03-26
+
+### Added
+- **qBittorrent tag support** — new `default_tag` field in `download.torrent`
+  config (env var `TORRENT_TAG`). Tags are sent as the qBittorrent `tags`
+  field (comma-separated). The `bookscout-{book_id}` tag is appended when
+  `book_id` is set, so both the configured tag and the per-book tracking tag
+  are applied together.
+
+---
+
 ## [0.50.15] - 2026-03-26
 
 ### Fixed
