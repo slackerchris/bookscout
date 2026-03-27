@@ -1,5 +1,16 @@
 # BookScout Changelog
 
+## [0.50.9] - 2026-03-26
+
+### Fixed
+- **`english_only` filter — Latin-script non-English books** — `BookOut` now
+  exposes the stored `language` code so the UI can filter on `language == 'en'`
+  directly. Previously the filter only detected non-Latin scripts (Cyrillic,
+  CJK, etc.) and let through translations in Latin-script languages like Polish.
+  Rows with no `language` value still fall back to the non-Latin script regex.
+
+---
+
 ## [0.50.8] - 2026-03-26
 
 ### Fixed
