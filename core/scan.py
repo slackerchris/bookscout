@@ -382,6 +382,29 @@ async def scan_author_by_id(
 
             updated_books += 1
 
+    # ------------------------------------------------------------------ language cleanup
+    # Soft-delete any existing books for this author whose language is KNOWN
+    # and doesn't match the language filter (e.g. Polish editions that were
+    # persisted before strict language filtering was in place) and are unowned.
+    if language_filter and language_filter != "all":
+        lang_cleanup_result = await session.execute(
+            select(Book)
+            .join(BookAuthor, and_(BookAuthor.book_id == Book.id, BookAuthor.author_id == author_id))
+            .where(
+                Book.deleted.is_(False),
+                Book.have_it.is_(False),
+                Book.language.isnot(None),
+                Book.language != language_filter,
+            )
+        )
+        for stale_book in lang_cleanup_result.scalars().all():
+            stale_book.deleted = True
+            stale_book.updated_at = datetime.now(timezone.utc)
+            logger.info(
+                "Soft-deleted non-matching language book",
+                extra={"book_id": stale_book.id, "title": stale_book.title, "language": stale_book.language},
+            )
+
     # ------------------------------------------------------------------ co-author discovery
     discovered_co_authors: list[str] = []
     for co_name in sorted(all_scan_co_names):

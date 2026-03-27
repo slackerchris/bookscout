@@ -1,5 +1,20 @@
 # BookScout Changelog
 
+## [0.50.11] - 2026-03-26
+
+### Fixed
+- **Non-English books persisting after rescan** — Scan now soft-deletes any
+  unowned books for the scanned author whose stored `language` is known and
+  doesn't match the configured `language_filter`. Previous scans left behind
+  Polish/etc. editions with `language='pl'` that the filter was correctly
+  excluding at query time but never removing from the DB.
+- **Google Books language default** — Removed the implicit `"en"` default for
+  the Google Books `language` field. Books with no language tag in the API
+  response now store `null` and are excluded by the language filter instead
+  of being assumed English.
+
+---
+
 ## [0.50.10] - 2026-03-26
 
 ### Changed

@@ -210,7 +210,7 @@ async def query_google_books(
             x["type"]: x["identifier"]
             for x in vi.get("industryIdentifiers", [])
         }
-        lang = vi.get("language", "en")
+        lang = vi.get("language") or None
         if language_filter and language_filter != "all" and lang != language_filter:
             continue
 
