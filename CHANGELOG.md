@@ -1,5 +1,14 @@
 # BookScout Changelog
 
+## [0.50.14] - 2026-03-26
+
+### Fixed
+- **Search returning epubs** — Reverted indexer category from `7000` (Books/
+  Ebooks) back to `3030` (Audio/Audiobook). Category 7000 returns epub/pdf
+  results; 3030 is the correct Newznab category for audiobook files (mp3/m4b).
+
+---
+
 ## [0.50.13] - 2026-03-26
 
 ### Fixed
