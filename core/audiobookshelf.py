@@ -23,6 +23,18 @@ _ROLE_SUFFIX_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Audiobook-specific parentheticals that should be stripped from titles at import.
+# e.g. "The Land: Founding (Unabridged)" → "The Land: Founding"
+_ABS_TITLE_NOISE_RE = re.compile(
+    r"\s*\(\s*(?:un)?abridged(?:\s+edition)?\s*\)",
+    re.IGNORECASE,
+)
+
+
+def _clean_abs_title(title: str) -> str:
+    """Strip audiobook-specific noise from an ABS item title."""
+    return _ABS_TITLE_NOISE_RE.sub("", title).strip()
+
 logger = logging.getLogger(__name__)
 
 # Author name strings that appear in ABS metadata but are not real authors.
@@ -220,13 +232,22 @@ async def get_all_books_from_audiobookshelf(
 
                 for item in items:
                     meta = item.get("media", {}).get("metadata", {})
-                    title = meta.get("title", "").strip()
+                    title = _clean_abs_title(meta.get("title", "").strip())
                     if not title:
                         continue
 
-                    author_raw = meta.get("authorName", "").strip()
-                    # Strip role annotations from author names
-                    author_raw = _ROLE_SUFFIX_RE.sub("", author_raw).strip()
+                    # Split multi-author strings and take the first clean name,
+                    # filtering out role annotations and noise values.
+                    raw_author = meta.get("authorName", "").strip()
+                    for sep in (" & ", " and ", ", "):
+                        raw_author = raw_author.replace(sep, "||")
+                    primary_author: str | None = None
+                    for part in raw_author.split("||"):
+                        part = _ROLE_SUFFIX_RE.sub("", part.strip()).strip()
+                        if len(part) <= 1 or part.lower() in _NOISE_AUTHORS:
+                            continue
+                        primary_author = part
+                        break
 
                     series_list = meta.get("series", []) or []
                     series_name = series_list[0].get("name") if series_list else None
@@ -234,7 +255,7 @@ async def get_all_books_from_audiobookshelf(
 
                     books.append({
                         "title": title,
-                        "author_name": author_raw or None,
+                        "author_name": primary_author,
                         "series_name": series_name,
                         "series_position": series_pos,
                         "asin": meta.get("asin") or None,

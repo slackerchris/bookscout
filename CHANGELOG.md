@@ -1,5 +1,15 @@
 # BookScout Changelog
 
+## [0.50.6] - 2026-03-26
+
+### Fixed
+- ABS sync now splits comma/ampersand-separated `authorName` strings and takes
+  only the primary author per book, eliminating ~600 phantom "authors" that
+  were being created from multi-author ABS metadata fields.
+- ABS sync strips role annotations (`- introduction`, `(narrator)` etc.) from
+  author names before matching/creating Author rows.
+- ABS sync strips `(Unabridged)` / `(Abridged)` from titles at import.
+
 ## [0.50.5] - 2026-03-26
 
 ### Fixed
