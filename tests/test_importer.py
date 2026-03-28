@@ -140,7 +140,7 @@ class TestImportDownload:
         result = import_download(src, lib, "J.N. Chaney", "Renegade Star #1",
                                  series="Renegade Star")
         assert result["errors"] == []
-        assert len(result["files_moved"]) == 2
+        assert len(result["files_copied"]) == 2
         assert result["extracted"] is False
         dest = Path(result["destination"])
         assert dest.exists()
@@ -155,7 +155,7 @@ class TestImportDownload:
         result = import_download(zip_path, lib, "Frank Herbert", "Dune")
         assert result["errors"] == []
         assert result["extracted"] is True
-        assert "audio.mp3" in result["files_moved"]
+        assert "audio.mp3" in result["files_copied"]
 
     def test_missing_source_returns_error(self, tmp_path):
         result = import_download(
@@ -164,7 +164,7 @@ class TestImportDownload:
             "Author",
             "Title",
         )
-        assert result["files_moved"] == []
+        assert result["files_copied"] == []
         assert any("does not exist" in e for e in result["errors"])
 
     def test_no_audio_files_returns_empty(self, tmp_path):
@@ -174,7 +174,7 @@ class TestImportDownload:
         lib = tmp_path / "library"
 
         result = import_download(src, lib, "Author", "Title")
-        assert result["files_moved"] == []
+        assert result["files_copied"] == []
         assert any("No audiobook files found" in e for e in result["errors"])
 
     def test_destination_without_series(self, tmp_path):

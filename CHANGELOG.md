@@ -39,6 +39,13 @@
   "High-confidence missing books") to fetch a single integer instead of
   downloading the full book list and calling `.length`.
 
+### Changed
+- **Importer now copies instead of moves** — `postprocess.mode: bookscout`
+  previously moved audio files into the organised library, which broke torrent
+  seeding.  The importer now uses `shutil.copy2` so originals are left in
+  place and torrents continue seeding uninterrupted.  The result payload key
+  has been renamed from `files_moved` to `files_copied`.
+
 ---
 
 ## [0.60.0] - 2026-03-27

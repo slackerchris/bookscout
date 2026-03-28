@@ -147,7 +147,7 @@ async def import_download_task(
         ),
     )
 
-    if result.get("files_moved"):
+    if result.get("files_copied"):
         async with AsyncSessionFactory() as session:
             book_result = await session.execute(select(Book).where(Book.id == book_id))
             book = book_result.scalar_one_or_none()

@@ -5,8 +5,9 @@ Given a source path (file or directory) and a book record, this module:
   2. Collects all audiobook files from the result.
   3. Builds a destination path:  <library_root>/<author>/<series>/<title>/
      (series segment is omitted when the book has no series_name).
-  4. Moves all files to the destination, creating directories as needed.
-  5. Returns a result dict describing what was moved.
+  4. Copies all files to the destination, creating directories as needed.
+     The originals are left intact so torrents continue seeding.
+  5. Returns a result dict describing what was copied.
 
 External dependencies
 ---------------------
@@ -172,7 +173,7 @@ def import_download(
     -------
     dict with keys:
         ``destination``  — final directory the files landed in
-        ``files_moved``  — list of filenames moved
+        ``files_copied``  — list of filenames copied
         ``extracted``    — True if at least one archive was unpacked
         ``skipped``      — files that already existed at destination
         ``errors``       — list of error strings (non-fatal)
@@ -183,7 +184,7 @@ def import_download(
     if not source.exists():
         return {
             "destination": None,
-            "files_moved": [],
+            "files_copied": [],
             "extracted": False,
             "skipped": [],
             "errors": [f"Source path does not exist: {source}"],
@@ -226,10 +227,10 @@ def import_download(
             unique_audio.append(af)
 
     if not unique_audio:
-        # Nothing to move — could be download still in progress or wrong path
+        # Nothing to copy — could be download still in progress or wrong path
         return {
             "destination": None,
-            "files_moved": [],
+            "files_copied": [],
             "extracted": extracted,
             "skipped": [],
             "errors": [f"No audiobook files found under: {source}"],
@@ -239,8 +240,8 @@ def import_download(
     dest = _build_dest(library_root, author, series, title)
     dest.mkdir(parents=True, exist_ok=True)
 
-    # ── Step 5: move files ──────────────────────────────────────────────────
-    files_moved: list[str] = []
+    # ── Step 5: copy files ──────────────────────────────────────────────────
+    files_copied: list[str] = []
     skipped: list[str] = []
 
     for af in unique_audio:
@@ -253,16 +254,16 @@ def import_download(
             )
             continue
         try:
-            shutil.move(str(af), str(target))
-            files_moved.append(af.name)
+            shutil.copy2(str(af), str(target))
+            files_copied.append(af.name)
             logger.info(
-                "import: moved file",
+                "import: copied file",
                 extra={"file": af.name, "dest": str(dest)},
             )
         except Exception as exc:
-            err = f"Failed to move {af.name}: {exc}"
+            err = f"Failed to copy {af.name}: {exc}"
             errors.append(err)
-            logger.error("import: move failed", extra={"file": af.name, "error": str(exc)})
+            logger.error("import: copy failed", extra={"file": af.name, "error": str(exc)})
 
     # ── Step 6: clean up empty work dirs ────────────────────────────────────
     for wd in work_dirs:
@@ -280,14 +281,14 @@ def import_download(
             "title": title,
             "series": series,
             "destination": str(dest),
-            "moved": len(files_moved),
+            "copied": len(files_copied),
             "skipped": len(skipped),
         },
     )
 
     return {
         "destination": str(dest),
-        "files_moved": files_moved,
+        "files_copied": files_copied,
         "extracted": extracted,
         "skipped": skipped,
         "errors": errors,
