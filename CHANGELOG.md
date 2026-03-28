@@ -4,6 +4,12 @@
 
 ### Changed
 - Bump version to ensure image tag uniquely identifies the new ASIN-first matching logic. No code changes from 0.62.4, just a version/tag update for deployment traceability.
+### Notes
+- Code changes in this release (also present in the pushed commits):
+  - `core/scan.py`: prefer ASIN-first ownership matching and add debug log `unmatched_debug` for ABS key mismatches.
+  - `core/audiobookshelf.py`: retains pre-colon short-key indexing (secondary fallback).
+  - `VERSION` bumped to `0.62.5`.
+  - `CHANGELOG.md` updated to clarify release contents.
 
 ## [0.62.4] - 2026-03-28
 
