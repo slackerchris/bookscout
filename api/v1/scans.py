@@ -5,11 +5,13 @@ return immediately with a job ID that clients can poll.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Author, Watchlist
+from db.models import Author, Book, Watchlist
 from db.session import get_session
 
 router = APIRouter(prefix="/scans", tags=["scans"])
@@ -69,3 +71,56 @@ async def job_status(job_id: str, request: Request):
             pass
 
     return response
+
+
+@router.get("/stats", summary="Scan statistics for the dashboard")
+async def scan_stats(session: AsyncSession = Depends(get_session)) -> dict:
+    """
+    Returns a snapshot of scan activity useful for dashboard stat cards:
+
+    - **last_scan_time**: when any author was most recently scanned
+    - **new_books_today**: books discovered since UTC midnight today
+    - **total_books**: all non-deleted books
+    - **total_missing**: non-deleted books not yet owned
+    - **authors_scanned_today**: watchlist entries scanned since UTC midnight
+    """
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    last_scan_time_row = await session.execute(
+        select(func.max(Watchlist.last_scanned))
+    )
+    last_scan_time = last_scan_time_row.scalar_one_or_none()
+
+    new_books_today_row = await session.execute(
+        select(func.count(Book.id)).where(
+            Book.deleted.is_(False),
+            Book.created_at >= today,
+        )
+    )
+    new_books_today = new_books_today_row.scalar_one()
+
+    total_books_row = await session.execute(
+        select(func.count(Book.id)).where(Book.deleted.is_(False))
+    )
+    total_books = total_books_row.scalar_one()
+
+    total_missing_row = await session.execute(
+        select(func.count(Book.id)).where(
+            Book.deleted.is_(False),
+            Book.have_it.is_(False),
+        )
+    )
+    total_missing = total_missing_row.scalar_one()
+
+    authors_scanned_today_row = await session.execute(
+        select(func.count(Watchlist.id)).where(Watchlist.last_scanned >= today)
+    )
+    authors_scanned_today = authors_scanned_today_row.scalar_one()
+
+    return {
+        "last_scan_time": last_scan_time,
+        "new_books_today": new_books_today,
+        "total_books": total_books,
+        "total_missing": total_missing,
+        "authors_scanned_today": authors_scanned_today,
+    }

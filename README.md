@@ -96,6 +96,9 @@ jackett:
   url: ""
   api_key: ""
 
+n8n:
+  url: ""    # optional — enables health check in /api/v1/search/status
+
 apis:
   google_books_key: ""    # optional — raises quota from 100 to 1000 req/day
   isbndb_key: ""          # optional — enables ISBNdb source
@@ -111,7 +114,7 @@ server:
   secret_key: change-me-in-production
 ```
 
-All YAML keys can be overridden with environment variables: `DATABASE_URL`, `REDIS_URL`, `AUDIOBOOKSHELF_URL`, `AUDIOBOOKSHELF_TOKEN`, `PROWLARR_URL`, `PROWLARR_API_KEY`, `GOOGLE_BOOKS_API_KEY`, `ISBNDB_API_KEY`, `SECRET_KEY`.
+All YAML keys can be overridden with environment variables: `DATABASE_URL`, `REDIS_URL`, `AUDIOBOOKSHELF_URL`, `AUDIOBOOKSHELF_TOKEN`, `PROWLARR_URL`, `PROWLARR_API_KEY`, `JACKETT_URL`, `JACKETT_API_KEY`, `N8N_URL`, `GOOGLE_BOOKS_API_KEY`, `ISBNDB_API_KEY`, `SECRET_KEY`.
 
 ## API Overview
 
@@ -124,13 +127,15 @@ All YAML keys can be overridden with environment variables: `DATABASE_URL`, `RED
 | `GET` | `/api/v1/authors/{id}/coauthors` | Co-authors discovered for an author |
 | `GET` | `/api/v1/authors/{id}/languages` | Per-language book count breakdown |
 | `GET` | `/api/v1/books` | List books (filterable by author, confidence, owned, `updated_since`) |
+| `GET` | `/api/v1/books/count` | Count books matching filter criteria (no payload — cheap stat-card query) |
 | `PATCH` | `/api/v1/books/{id}` | Update book metadata |
 | `POST` | `/api/v1/books/{id}/search` | Search indexers for a specific book |
 | `POST` | `/api/v1/scans/author/{id}` | Enqueue scan for one author |
 | `POST` | `/api/v1/scans/all` | Enqueue scan for all watchlist authors |
+| `GET` | `/api/v1/scans/stats` | Scan statistics (last scan time, new books today, totals) |
 | `POST` | `/api/v1/search` | Search Prowlarr + Jackett indexers |
 | `POST` | `/api/v1/search/download` | Send an indexer result to your download client |
-| `GET` | `/api/v1/search/status` | Check indexer and download client connectivity |
+| `GET` | `/api/v1/search/status` | Check indexer, download client, and n8n connectivity |
 | `GET` | `/api/v1/library-paths` | List filesystem library paths |
 | `POST` | `/api/v1/library-paths` | Register a new library path |
 | `POST` | `/api/v1/library-paths/{id}/scan` | Trigger filesystem scan |

@@ -1,5 +1,46 @@
 # BookScout Changelog
 
+## [0.61.0] - 2026-03-27
+
+### Added
+- **`GET /api/v1/search/status` — n8n health check** — The status endpoint now
+  includes an `"automation"` key alongside `"indexers"` and `"download_client"`.
+  It hits n8n's `GET /healthz` endpoint and returns the standard
+  `ServiceStatus` shape (`configured`, `status`, `detail`).  Configure via the
+  `N8N_URL` environment variable (or `n8n.url` in `config.yaml`); the
+  docker-compose file now forwards `N8N_URL`.  When unset the field reports
+  `{"configured": false}`.
+
+- **`GET /authors/` now returns `book_count`, `owned_count`, and
+  `last_scanned`** — Previously these three fields were only available from the
+  per-author detail endpoint (`GET /authors/{id}`), requiring a separate request
+  per author card to show counts or the last-scanned timestamp.  A single
+  query with two aggregating subqueries and a watchlist join now surfaces them
+  on every row of the list response so author cards can render "12 books · 3
+  owned · last scanned 2 days ago" without extra round-trips.  The response
+  model has been promoted from `AuthorOut` to `AuthorDetailOut` (no breaking
+  field removal — only additions).
+
+- **`GET /api/v1/scans/stats` — new scan statistics endpoint** — Returns a
+  lightweight snapshot for dashboard stat cards:
+  - `last_scan_time` — timestamp of the most recent watchlist scan
+  - `new_books_today` — books created since UTC midnight
+  - `total_books` — total non-deleted books
+  - `total_missing` — non-deleted books not yet owned
+  - `authors_scanned_today` — watchlist entries scanned since UTC midnight
+
+  All values are computed with single aggregate queries; no full book-list
+  download required.
+
+- **`GET /api/v1/books/count` — cheap count endpoint** — Returns
+  `{"count": N}` with the same filter parameters as `GET /books/`
+  (`author_id`, `confidence_band`, `have_it`, `missing_only`,
+  `include_deleted`, `updated_since`).  Allows dashboard stat cards (e.g.
+  "High-confidence missing books") to fetch a single integer instead of
+  downloading the full book list and calling `.length`.
+
+---
+
 ## [0.60.0] - 2026-03-27
 
 ### Fixed

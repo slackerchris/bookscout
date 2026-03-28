@@ -181,17 +181,59 @@ async def list_coauthors(
     ]
 
 
-@router.get("/", response_model=list[AuthorOut], summary="List watched authors")
+@router.get("/", response_model=list[AuthorDetailOut], summary="List watched authors")
 async def list_authors(
     active_only: bool = True,
     session: AsyncSession = Depends(get_session),
-) -> list[Author]:
-    q = select(Author)
+) -> list[AuthorDetailOut]:
+    # Subquery: total catalog books per author
+    bc_sq = (
+        select(BookAuthor.author_id, func.count(Book.id).label("bc"))
+        .join(Book, Book.id == BookAuthor.book_id)
+        .where(BookAuthor.role == "author", Book.deleted.is_(False))
+        .group_by(BookAuthor.author_id)
+        .subquery()
+    )
+    # Subquery: owned books per author
+    oc_sq = (
+        select(BookAuthor.author_id, func.count(Book.id).label("oc"))
+        .join(Book, Book.id == BookAuthor.book_id)
+        .where(BookAuthor.role == "author", Book.deleted.is_(False), Book.have_it.is_(True))
+        .group_by(BookAuthor.author_id)
+        .subquery()
+    )
+
+    q = (
+        select(
+            Author,
+            Watchlist.last_scanned,
+            func.coalesce(bc_sq.c.bc, 0).label("book_count"),
+            func.coalesce(oc_sq.c.oc, 0).label("owned_count"),
+        )
+        .outerjoin(Watchlist, Watchlist.author_id == Author.id)
+        .outerjoin(bc_sq, bc_sq.c.author_id == Author.id)
+        .outerjoin(oc_sq, oc_sq.c.author_id == Author.id)
+    )
     if active_only:
         q = q.where(Author.active.is_(True))
     q = q.order_by(Author.name_sort)
+
     result = await session.execute(q)
-    return list(result.scalars().all())
+    rows = result.all()
+    return [
+        AuthorDetailOut(
+            id=row[0].id,
+            name=row[0].name,
+            name_sort=row[0].name_sort,
+            asin=row[0].asin,
+            openlibrary_key=row[0].openlibrary_key,
+            active=row[0].active,
+            last_scanned=row[1],
+            book_count=row[2],
+            owned_count=row[3],
+        )
+        for row in rows
+    ]
 
 
 @router.post(

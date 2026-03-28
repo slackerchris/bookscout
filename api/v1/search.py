@@ -16,6 +16,7 @@ from core.search import (
     fetch_download_queue,
     check_prowlarr_status,
     check_jackett_status,
+    check_n8n_status,
     check_sabnzbd_status,
     check_qbittorrent_status,
     check_transmission_status,
@@ -114,6 +115,7 @@ async def download_status() -> dict:
     config = get_config()
     prowlarr = getattr(config, "prowlarr", None)
     jackett = getattr(config, "jackett", None)
+    n8n_cfg = getattr(config, "n8n", None)
     dl = getattr(config, "download", None)
     preferred = getattr(dl, "preferred", "") if dl else ""
     sabnzbd = getattr(dl, "sabnzbd", None) if dl else None
@@ -131,6 +133,10 @@ async def download_status() -> dict:
                 client,
                 getattr(jackett, "url", "") if jackett else "",
                 getattr(jackett, "api_key", "") if jackett else "",
+            ),
+            check_n8n_status(
+                client,
+                getattr(n8n_cfg, "url", "") if n8n_cfg else "",
             ),
         )
 
@@ -162,6 +168,9 @@ async def download_status() -> dict:
         "indexers": {
             "prowlarr": indexer_checks[0],
             "jackett": indexer_checks[1],
+        },
+        "automation": {
+            "n8n": indexer_checks[2],
         },
         "download_client": {
             dl_name: dl_result,

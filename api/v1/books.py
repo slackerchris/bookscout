@@ -6,7 +6,7 @@ from datetime import datetime
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_config
@@ -65,6 +65,51 @@ class BookUpdate(BaseModel):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@router.get("/count", summary="Count books matching filter criteria")
+async def count_books(
+    author_id: int | None = Query(None, description="Filter by primary author"),
+    confidence_band: str | None = Query(None, description="high | medium | low"),
+    have_it: bool | None = Query(None, description="Owned flag filter"),
+    missing_only: bool = Query(False, description="Shorthand for have_it=false"),
+    include_deleted: bool = Query(False),
+    updated_since: datetime | None = Query(
+        None,
+        description="ISO 8601 timestamp; count only books updated after this value.",
+    ),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return ``{"count": N}`` — identical filter semantics to ``GET /books/``
+    but cheap enough to use for dashboard stat cards."""
+    q = select(func.count(Book.id))
+
+    if not include_deleted:
+        q = q.where(Book.deleted.is_(False))
+
+    if author_id is not None:
+        q = q.join(
+            BookAuthor,
+            and_(
+                BookAuthor.book_id == Book.id,
+                BookAuthor.author_id == author_id,
+                BookAuthor.role == "author",
+            ),
+        )
+
+    if confidence_band is not None:
+        q = q.where(Book.confidence_band == confidence_band)
+
+    if missing_only:
+        q = q.where(Book.have_it.is_(False))
+    elif have_it is not None:
+        q = q.where(Book.have_it == have_it)
+
+    if updated_since is not None:
+        q = q.where(Book.updated_at > updated_since)
+
+    result = await session.execute(q)
+    return {"count": result.scalar_one()}
+
 
 @router.get("/", response_model=list[BookOut], summary="List books")
 async def list_books(

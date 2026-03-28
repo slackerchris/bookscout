@@ -540,3 +540,18 @@ async def check_transmission_status(
         return {"configured": True, "status": "error", "detail": f"HTTP {r.status_code}"}
     except Exception as exc:
         return {"configured": True, "status": "error", "detail": str(exc)}
+
+
+async def check_n8n_status(
+    client: httpx.AsyncClient,
+    n8n_url: str,
+) -> dict[str, Any]:
+    if not n8n_url:
+        return {"configured": False}
+    try:
+        r = await client.get(f"{n8n_url}/healthz", timeout=10)
+        if r.status_code == 200:
+            return {"configured": True, "status": "ok"}
+        return {"configured": True, "status": "error", "detail": f"HTTP {r.status_code}"}
+    except Exception as exc:
+        return {"configured": True, "status": "error", "detail": str(exc)}
