@@ -1,15 +1,18 @@
 # BookScout Changelog
 
+## [0.62.6] - 2026-03-28
+
+### Changed
+- **ASIN-first ownership matching** — `core/scan.py` now checks `abs_owned_by_asin` before falling back to normalized title key matching, ensuring exact ASIN matches work regardless of title formatting differences.
+- **Debug logging for unmatched ABS keys** — Added `unmatched_debug` log in `core/scan.py` mapping ABS keys to scanned book titles to diagnose ownership matching failures.
+
+### Notes
+- `core/audiobookshelf.py`: retains pre-colon short-key indexing as secondary fallback for non-ASIN cases.
+
 ## [0.62.5] - 2026-03-28
 
 ### Changed
-- Bump version to ensure image tag uniquely identifies the new ASIN-first matching logic. No code changes from 0.62.4, just a version/tag update for deployment traceability.
-### Notes
-- Code changes in this release (also present in the pushed commits):
-  - `core/scan.py`: prefer ASIN-first ownership matching and add debug log `unmatched_debug` for ABS key mismatches.
-  - `core/audiobookshelf.py`: retains pre-colon short-key indexing (secondary fallback).
-  - `VERSION` bumped to `0.62.5`.
-  - `CHANGELOG.md` updated to clarify release contents.
+- Version tag update only (no functional changes from 0.62.4).
 
 ## [0.62.4] - 2026-03-28
 
