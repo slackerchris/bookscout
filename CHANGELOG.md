@@ -1,5 +1,10 @@
 # BookScout Changelog
 
+## [0.62.1] - 2026-03-28
+
+### Fixed
+- **`KeyError: 'name'` crash in `_find_author` fuzzy-fallback path** — `logger.warning(..., extra={"name": name})` collides with the reserved `name` attribute on Python's `LogRecord`, raising a `KeyError` and aborting persistence of every book that hit the fuzzy fallback.  Renamed the extra key to `author_name`.
+
 ## [0.62.0] - 2026-03-28
 
 Code-review remediation covering 25 issues across security, correctness,

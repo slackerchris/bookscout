@@ -643,7 +643,7 @@ async def _find_author(session: AsyncSession, name: str) -> Author | None:
         return author
 
     # 3b. Fuzzy fallback — O(n) scan, capped as a safety valve
-    logger.warning("_find_author falling back to full-table fuzzy match", extra={"name": name})
+    logger.warning("_find_author falling back to full-table fuzzy match", extra={"author_name": name})
     all_result = await session.execute(select(Author).limit(1000))
     for existing in all_result.scalars():
         if author_names_match(name, existing.name):
