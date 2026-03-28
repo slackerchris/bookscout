@@ -3,13 +3,11 @@
 ## [0.62.4] - 2026-03-28
 
 ### Fixed
-- **`have_it` false when Audnexus returns short title and ABS stores long title** —
-  Audnexus returns `"Discovery"` (short title) with `"Red Company"` as the series
-  field; `merge_books` keeps the shorter title, so `book["title"]` = `"Discovery"`
-  → key `"discovery"` — which never matches any ABS key.  `_enrich_book` now
-  tries a third lookup: `normalize_title_key(f"{series}: {title}")` when the
-  plain-title lookup misses and the book has a known series, composing
-  `"Red Company: Discovery"` which matches the full ABS key correctly.
+- **`have_it` false due to title-key mismatch** — Simplified ownership matching
+  in `_enrich_book` to check ASIN first (exact unique identifier) and only fall
+  back to normalised title key.  Removes brittle composed-key and short-key
+  patches in favour of the reliable ASIN match that works regardless of how
+  either side formats the title.
 
 ## [0.62.3] - 2026-03-28
 
