@@ -1,5 +1,18 @@
 # BookScout Changelog
 
+## [0.61.3] - 2026-03-28
+
+### Fixed
+- **Missing `author_names_match` import in `audiobookshelf.py`** — The
+  `fetch_abs_books_for_author()` function called `author_names_match()` but
+  only `normalize_author_name` was imported, causing every ABS ownership check
+  to fail with `NameError` and return an empty result set.
+- **`MultipleResultsFound` crash in `_find_existing_book`** — When duplicate
+  book rows share the same ASIN or ISBN (possible after data imports), the
+  identifier-lookup phase used `scalar_one_or_none()` which raises if more than
+  one row matches.  Switched to `scalars().first()` so a duplicate record does
+  not abort the entire author scan.
+
 ## [0.61.2] - 2026-03-27
 
 ### Added

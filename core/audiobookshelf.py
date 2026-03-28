@@ -9,7 +9,7 @@ import re
 
 import httpx
 
-from core.normalize import abs_search_title, normalize_author_name, normalize_title_key
+from core.normalize import abs_search_title, author_names_match, normalize_author_name, normalize_title_key
 
 # Matches role annotations appended to author names in ABS metadata, e.g.:
 #   "Christopher Tolkien - editor"

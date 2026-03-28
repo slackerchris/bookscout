@@ -540,7 +540,7 @@ async def _find_existing_book(
             q = await session.execute(
                 select(Book).where(field == value)
             )
-            found = q.scalar_one_or_none()
+            found = q.scalars().first()
             if found:
                 link_q = await session.execute(
                     select(BookAuthor).where(
