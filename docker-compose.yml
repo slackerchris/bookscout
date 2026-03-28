@@ -62,6 +62,11 @@ services:
     restart: unless-stopped
     networks:
       - bookscout
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
 
   # ── Background worker (arq) ───────────────────────────────────────────────
   worker:
@@ -106,6 +111,11 @@ services:
     restart: unless-stopped
     networks:
       - bookscout
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
 
   postgres:
     image: postgres:16-alpine
@@ -124,6 +134,11 @@ services:
     restart: unless-stopped
     networks:
       - bookscout
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
 
   redis:
     image: redis:7-alpine
@@ -139,6 +154,11 @@ services:
     restart: unless-stopped
     networks:
       - bookscout
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
 
   # ── Optional UI (opt-in via profile) ───────────────────────────────────────
   # Start with:  docker compose --profile ui up -d

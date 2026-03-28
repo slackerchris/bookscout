@@ -9,12 +9,18 @@ Interactive API docs are available at  /docs  (Swagger UI)
 from __future__ import annotations
 
 import logging
+import pathlib
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 
+_VERSION = (pathlib.Path(__file__).parent / "VERSION").read_text().strip()
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from config import get_config
 from core.logging_config import setup_logging
 
 setup_logging()
@@ -61,19 +67,50 @@ app = FastAPI(
         "checks your Audiobookshelf library for ownership; "
         "delivers notifications via SSE and webhooks."
     ),
-    version="0.50.0",
+    version=_VERSION,
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
 )
 
+_cors_origins: list[str] = getattr(
+    getattr(get_config(), "server", None), "cors_origins", None
+) or ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Optional bearer-token authentication ─────────────────────────────────────
+# When server.secret_key is set to something other than the default placeholder,
+# all endpoints except /health and /docs|/redoc|/openapi.json require a valid
+# Authorization: Bearer <token> header.
+
+_DEFAULT_SECRET = "bookscout-secret-key-change-in-production"
+_PUBLIC_PREFIXES = ("/health", "/docs", "/redoc", "/openapi.json")
+
+
+class BearerTokenMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        config = getattr(getattr(request.app, "state", None), "config", None)
+        secret = getattr(getattr(config, "server", None), "secret_key", _DEFAULT_SECRET)
+        # Skip auth when secret is unset or still the default placeholder
+        if not secret or secret == _DEFAULT_SECRET:
+            return await call_next(request)
+        # Always allow public endpoints
+        if any(request.url.path.startswith(p) for p in _PUBLIC_PREFIXES):
+            return await call_next(request)
+        auth = request.headers.get("authorization", "")
+        if auth == f"Bearer {secret}":
+            return await call_next(request)
+        return JSONResponse(status_code=401, content={"detail": "Missing or invalid bearer token"})
+
+
+app.add_middleware(BearerTokenMiddleware)
 
 # ── Mount routers ────────────────────────────────────────────────────────────
 from api.v1.authors import router as authors_router

@@ -93,23 +93,16 @@
 prolific-author scans, and consolidate duplicated helper code before the test
 suite lands.
 
-### `_find_existing_book` — filter deleted books in Phase 1
+### `_find_existing_book` — Phase 1 intentionally includes soft-deleted rows
 
 **File:** `core/scan.py`  
-**Problem:** The Phase 1 global identifier lookup (`isbn13 → isbn → asin`) has
-no `deleted.is_(False)` guard.  A soft-deleted book can match, the scan skips
-re-inserting it (the `existing and existing.deleted` guard returns `continue`),
-and the title is silently absent from scan results.  
-**Fix:** Add `.where(Book.deleted.is_(False))` to each Phase 1 query, or log a
-`logger.warning("skipping soft-deleted book %s", found.id)` at minimum so the
-gap is visible in structured logs.
-
-```python
-# Phase 1 query — add deleted filter
-q = await session.execute(
-    select(Book).where(field == value, Book.deleted.is_(False))
-)
-```
+**Decision (v0.61.1):** Phase 1 *intentionally* includes soft-deleted rows so
+that the caller's `if existing and existing.deleted: continue` guard can prevent
+re-creation of intentionally deleted books.  Adding `.where(Book.deleted.is_(False))`
+here would cause the scan to re-insert a duplicate row for any soft-deleted book
+whose ASIN/ISBN still appears in upstream metadata.  
+**Status:** Resolved — no code change needed.  The caller skip-guard is the
+correct design.
 
 ### `check_audiobookshelf` — semaphore-bounded concurrency
 

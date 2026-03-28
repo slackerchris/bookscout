@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import httpx
 
@@ -26,7 +26,13 @@ router = APIRouter(prefix="/search", tags=["search"])
 
 
 class SearchRequest(BaseModel):
-    query: str
+    query: str = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        pattern=r"^[\w\s.,':\-!?&()]+$",
+        description="Search query forwarded to Prowlarr/Jackett (max 500 chars, alphanumeric + common punctuation).",
+    )
 
 
 class DownloadRequest(BaseModel):

@@ -91,6 +91,23 @@ async def sync_books(
     existing_result = await session.execute(select(Author))
     existing_authors: list[Author] = list(existing_result.scalars().all())
 
+    # Build a normalised-key index for O(1) lookups; fall back to fuzzy only on miss
+    _author_key_index: dict[str, Author] = {
+        normalize_author_key(a.name): a for a in existing_authors
+    }
+
+    def _find_author_fast(name: str) -> Author | None:
+        key = normalize_author_key(name)
+        hit = _author_key_index.get(key)
+        if hit:
+            return hit
+        # Fuzzy fallback for initial-expansion variants
+        for a in existing_authors:
+            if author_names_match(name, a.name):
+                _author_key_index[key] = a  # cache for next lookup
+                return a
+        return None
+
     new_books = 0
     updated_books = 0
     affected_author_ids: set[int] = set()
@@ -102,10 +119,7 @@ async def sync_books(
             continue
 
         # ---- find or create the author --------------------------------
-        author_obj: Author | None = next(
-            (a for a in existing_authors if author_names_match(author_name, a.name)),
-            None,
-        )
+        author_obj: Author | None = _find_author_fast(author_name)
         if author_obj is None:
             author_obj = Author(
                 name=author_name,
@@ -116,6 +130,7 @@ async def sync_books(
             await session.flush()
             session.add(Watchlist(author_id=author_obj.id))
             existing_authors.append(author_obj)
+            _author_key_index[normalize_author_key(author_name)] = author_obj
 
         affected_author_ids.add(author_obj.id)
 

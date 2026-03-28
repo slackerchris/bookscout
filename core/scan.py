@@ -20,7 +20,7 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any, Callable, Coroutine
+from typing import Any, Callable, Coroutine, TypedDict
 
 import httpx
 from sqlalchemy import and_, delete, select
@@ -108,16 +108,24 @@ def _is_contributor_only(name: str) -> bool:
     return bool(_CONTRIBUTOR_ROLE_RE.search(stripped))
 
 
+class ScanResult(TypedDict):
+    author_id: int
+    author_name: str
+    books_found: int
+    new_books: int
+    updated_books: int
+
+
 async def scan_author_by_id(
     session: AsyncSession,
     author_id: int,
     config: Any = None,
     redis_client: Any = None,
-) -> dict[str, Any]:
+) -> ScanResult:
     """Run the full scan pipeline for a single author.
 
-    Returns a summary dict:
-    ``{"author_id", "author_name", "books_found", "new_books", "updated_books"}``
+    Returns a ``ScanResult`` dict with author_id, author_name, books_found,
+    new_books, and updated_books.
     """
     # ------------------------------------------------------------------ config
     language_filter = "en"
@@ -242,173 +250,192 @@ async def scan_author_by_id(
     updated_books = 0
     discovered: list[dict[str, Any]] = []
     all_scan_co_names: set[str] = set()
+    _BATCH_SIZE = 50
 
-    for book in all_books:
-        existing, is_cross_author = await _find_existing_book(session, author_id, book)
+    for idx, book in enumerate(all_books, 1):
+        try:
+            existing, is_cross_author = await _find_existing_book(session, author_id, book)
 
-        # Never re-add intentionally deleted books
-        if existing and existing.deleted:
+            # Never re-add intentionally deleted books
+            if existing and existing.deleted:
+                continue
+
+            source_val = book.get("source", [])
+            source_str = json.dumps(source_val) if isinstance(source_val, list) else (source_val or "")
+            score_reasons_str = json.dumps(book.get("score_reasons") or [])
+            have_it_bool = bool(book.get("have_it", False))
+            # Build narrator string from the narrators list (never touches Author table)
+            narrator_names: list[str] = [
+                n for n in (book.get("narrators") or [])
+                if n and not _is_contributor_only(n)
+            ]
+            narrator_str: str | None = ", ".join(narrator_names) if narrator_names else None
+            co_authors = [
+                a for a in (book.get("authors") or [])
+                if not author_names_match(author_name, a)
+                and not _is_contributor_only(a)
+            ]
+            all_scan_co_names.update(co_authors)
+            published_year = _parse_year(book.get("release_date"))
+
+            if not existing:
+                new_book = Book(
+                    title=book["title"],
+                    title_sort=sort_title(book["title"]),
+                    subtitle=book.get("subtitle"),
+                    isbn=book.get("isbn"),
+                    isbn13=book.get("isbn13"),
+                    asin=book.get("asin"),
+                    release_date=str(book.get("release_date") or "") or None,
+                    published_year=published_year,
+                    format=book.get("format"),
+                    language=book.get("language"),
+                    source=source_str,
+                    cover_url=book.get("cover_url"),
+                    description=book.get("description"),
+                    series_name=book.get("series"),
+                    series_position=book.get("series_position"),
+                    narrator=narrator_str,
+                    have_it=have_it_bool,
+                    score=book.get("score", 0),
+                    confidence_band=book.get("confidence_band", "low"),
+                    score_reasons=score_reasons_str,
+                    match_method="audiobookshelf" if have_it_bool else "api",
+                )
+                session.add(new_book)
+                await session.flush()  # populate new_book.id
+
+                # Primary author link
+                session.add(
+                    BookAuthor(book_id=new_book.id, author_id=author_id, role="author")
+                )
+                # Co-author links — only create Author rows when auto_add_coauthors
+                # is enabled; otherwise link only already-tracked authors.
+                new_book_co_ids: set[int] = set()
+                for co_name in co_authors:
+                    if auto_add_coauthors:
+                        co_author = await _get_or_create_author(session, co_name)
+                    else:
+                        co_author = await _find_author(session, co_name)
+                    if co_author and co_author.id not in new_book_co_ids:
+                        new_book_co_ids.add(co_author.id)
+                        session.add(
+                            BookAuthor(book_id=new_book.id, author_id=co_author.id, role="co-author")
+                        )
+
+                new_books += 1
+                if book.get("confidence_band") in ("high", "medium") or have_it_bool:
+                    discovered.append(
+                        {
+                            "title": book["title"],
+                            "author": author_name,
+                            "have_it": have_it_bool,
+                            "confidence_band": book.get("confidence_band"),
+                        }
+                    )
+            else:
+                # Cross-author hit: promote scanning author to primary author
+                if is_cross_author:
+                    session.add(
+                        BookAuthor(book_id=existing.id, author_id=author_id, role="author")
+                    )
+                    await session.execute(
+                        delete(BookAuthor).where(
+                            and_(
+                                BookAuthor.book_id == existing.id,
+                                BookAuthor.author_id == author_id,
+                                BookAuthor.role == "co-author",
+                            )
+                        )
+                    )
+
+                # Only upgrade have_it — never downgrade it.  ABS search returns
+                # False for "not found" AND for fuzzy-match misses, so a False result
+                # is not a reliable confirmation that the book is absent.  The
+                # filesystem scanner is the correct tool for clearing ownership.
+                if have_it_bool:
+                    existing.have_it = True
+                    existing.match_method = "audiobookshelf"
+
+                # ABS series data is authoritative; overwrite when ABS provides it.
+                # For all other fields coalesce: only fill in fields that are currently empty.
+                abs_series = book.get("series")
+                abs_pos = book.get("series_position")
+                if abs_series:
+                    existing.series_name = abs_series
+                    existing.series_position = abs_pos
+                elif not existing.series_name and abs_pos:
+                    existing.series_position = abs_pos
+
+                for attr, new_val in (
+                    ("cover_url", book.get("cover_url")),
+                    ("subtitle", book.get("subtitle")),
+                    ("description", book.get("description")),
+                    ("asin", book.get("asin")),
+                    ("isbn", book.get("isbn")),
+                    ("isbn13", book.get("isbn13")),
+                    ("language", book.get("language")),
+                    ("narrator", narrator_str),
+                ):
+                    if not getattr(existing, attr) and new_val:
+                        setattr(existing, attr, new_val)
+
+                existing.score = book.get("score", 0)
+                existing.confidence_band = book.get("confidence_band", "low")
+                existing.score_reasons = score_reasons_str
+                existing.updated_at = datetime.now(timezone.utc)
+
+                # Full set-reconcile for co-author links.
+                # Lock the book row to prevent concurrent scans (e.g. overlapping
+                # author scans that share books) from racing on the co-author set.
+                await session.execute(
+                    select(Book).where(Book.id == existing.id).with_for_update()
+                )
+                existing_co_result = await session.execute(
+                    select(BookAuthor.author_id).where(
+                        and_(
+                            BookAuthor.book_id == existing.id,
+                            BookAuthor.role == "co-author",
+                        )
+                    )
+                )
+                existing_co_ids: set[int] = {row[0] for row in existing_co_result.fetchall()}
+                fresh_co_ids: set[int] = set()
+                for co_name in co_authors:
+                    if auto_add_coauthors:
+                        co_author = await _get_or_create_author(session, co_name)
+                    else:
+                        co_author = await _find_author(session, co_name)
+                    if co_author:
+                        if co_author.id not in existing_co_ids and co_author.id not in fresh_co_ids:
+                            session.add(
+                                BookAuthor(book_id=existing.id, author_id=co_author.id, role="co-author")
+                            )
+                        fresh_co_ids.add(co_author.id)
+                for stale_id in existing_co_ids - fresh_co_ids:
+                    await session.execute(
+                        delete(BookAuthor).where(
+                            and_(
+                                BookAuthor.book_id == existing.id,
+                                BookAuthor.author_id == stale_id,
+                                BookAuthor.role == "co-author",
+                            )
+                        )
+                    )
+
+                updated_books += 1
+
+        except Exception:
+            logger.exception(
+                "Failed to persist book",
+                extra={"author_id": author_id, "title": book.get("title")},
+            )
+            await session.rollback()
             continue
 
-        source_val = book.get("source", [])
-        source_str = json.dumps(source_val) if isinstance(source_val, list) else (source_val or "")
-        score_reasons_str = json.dumps(book.get("score_reasons") or [])
-        have_it_bool = bool(book.get("have_it", False))
-        # Build narrator string from the narrators list (never touches Author table)
-        narrator_names: list[str] = [
-            n for n in (book.get("narrators") or [])
-            if n and not _is_contributor_only(n)
-        ]
-        narrator_str: str | None = ", ".join(narrator_names) if narrator_names else None
-        co_authors = [
-            a for a in (book.get("authors") or [])
-            if not author_names_match(author_name, a)
-            and not _is_contributor_only(a)
-        ]
-        all_scan_co_names.update(co_authors)
-        published_year = _parse_year(book.get("release_date"))
-
-        if not existing:
-            new_book = Book(
-                title=book["title"],
-                title_sort=sort_title(book["title"]),
-                subtitle=book.get("subtitle"),
-                isbn=book.get("isbn"),
-                isbn13=book.get("isbn13"),
-                asin=book.get("asin"),
-                release_date=str(book.get("release_date") or "") or None,
-                published_year=published_year,
-                format=book.get("format"),
-                language=book.get("language"),
-                source=source_str,
-                cover_url=book.get("cover_url"),
-                description=book.get("description"),
-                series_name=book.get("series"),
-                series_position=book.get("series_position"),
-                narrator=narrator_str,
-                have_it=have_it_bool,
-                score=book.get("score", 0),
-                confidence_band=book.get("confidence_band", "low"),
-                score_reasons=score_reasons_str,
-                match_method="audiobookshelf" if have_it_bool else "api",
-            )
-            session.add(new_book)
-            await session.flush()  # populate new_book.id
-
-            # Primary author link
-            session.add(
-                BookAuthor(book_id=new_book.id, author_id=author_id, role="author")
-            )
-            # Co-author links — only create Author rows when auto_add_coauthors
-            # is enabled; otherwise link only already-tracked authors.
-            new_book_co_ids: set[int] = set()
-            for co_name in co_authors:
-                if auto_add_coauthors:
-                    co_author = await _get_or_create_author(session, co_name)
-                else:
-                    co_author = await _find_author(session, co_name)
-                if co_author and co_author.id not in new_book_co_ids:
-                    new_book_co_ids.add(co_author.id)
-                    session.add(
-                        BookAuthor(book_id=new_book.id, author_id=co_author.id, role="co-author")
-                    )
-
-            new_books += 1
-            if book.get("confidence_band") in ("high", "medium") or have_it_bool:
-                discovered.append(
-                    {
-                        "title": book["title"],
-                        "author": author_name,
-                        "have_it": have_it_bool,
-                        "confidence_band": book.get("confidence_band"),
-                    }
-                )
-        else:
-            # Cross-author hit: promote scanning author to primary author
-            if is_cross_author:
-                session.add(
-                    BookAuthor(book_id=existing.id, author_id=author_id, role="author")
-                )
-                await session.execute(
-                    delete(BookAuthor).where(
-                        and_(
-                            BookAuthor.book_id == existing.id,
-                            BookAuthor.author_id == author_id,
-                            BookAuthor.role == "co-author",
-                        )
-                    )
-                )
-
-            # Only upgrade have_it — never downgrade it.  ABS search returns
-            # False for "not found" AND for fuzzy-match misses, so a False result
-            # is not a reliable confirmation that the book is absent.  The
-            # filesystem scanner is the correct tool for clearing ownership.
-            if have_it_bool:
-                existing.have_it = True
-                existing.match_method = "audiobookshelf"
-
-            # ABS series data is authoritative; overwrite when ABS provides it.
-            # For all other fields coalesce: only fill in fields that are currently empty.
-            abs_series = book.get("series")
-            abs_pos = book.get("series_position")
-            if abs_series:
-                existing.series_name = abs_series
-                existing.series_position = abs_pos
-            elif not existing.series_name and abs_pos:
-                existing.series_position = abs_pos
-
-            for attr, new_val in (
-                ("cover_url", book.get("cover_url")),
-                ("subtitle", book.get("subtitle")),
-                ("description", book.get("description")),
-                ("asin", book.get("asin")),
-                ("isbn", book.get("isbn")),
-                ("isbn13", book.get("isbn13")),
-                ("language", book.get("language")),
-                ("narrator", narrator_str),
-            ):
-                if not getattr(existing, attr) and new_val:
-                    setattr(existing, attr, new_val)
-
-            existing.score = book.get("score", 0)
-            existing.confidence_band = book.get("confidence_band", "low")
-            existing.score_reasons = score_reasons_str
-            existing.updated_at = datetime.now(timezone.utc)
-
-            # Full set-reconcile for co-author links
-            existing_co_result = await session.execute(
-                select(BookAuthor.author_id).where(
-                    and_(
-                        BookAuthor.book_id == existing.id,
-                        BookAuthor.role == "co-author",
-                    )
-                )
-            )
-            existing_co_ids: set[int] = {row[0] for row in existing_co_result.fetchall()}
-            fresh_co_ids: set[int] = set()
-            for co_name in co_authors:
-                if auto_add_coauthors:
-                    co_author = await _get_or_create_author(session, co_name)
-                else:
-                    co_author = await _find_author(session, co_name)
-                if co_author:
-                    if co_author.id not in existing_co_ids and co_author.id not in fresh_co_ids:
-                        session.add(
-                            BookAuthor(book_id=existing.id, author_id=co_author.id, role="co-author")
-                        )
-                    fresh_co_ids.add(co_author.id)
-            for stale_id in existing_co_ids - fresh_co_ids:
-                await session.execute(
-                    delete(BookAuthor).where(
-                        and_(
-                            BookAuthor.book_id == existing.id,
-                            BookAuthor.author_id == stale_id,
-                            BookAuthor.role == "co-author",
-                        )
-                    )
-                )
-
-            updated_books += 1
+        # Batch-flush every N books to bound the session identity map
+        if idx % _BATCH_SIZE == 0:
+            await session.flush()
 
     # ------------------------------------------------------------------ language cleanup
     # Soft-delete any existing books for this author whose language is KNOWN
@@ -531,45 +558,52 @@ async def _find_existing_book(
     """
     # Phase 1: global identifier lookup — no author filter; include soft-deleted rows
     # so the caller's guard can prevent re-creation of intentionally deleted books.
-    for field, value in (
-        (Book.isbn13, book.get("isbn13")),
-        (Book.isbn, book.get("isbn")),
-        (Book.asin, book.get("asin")),
-    ):
-        if value:
-            q = await session.execute(
-                select(Book).where(field == value)
-            )
-            found = q.scalars().first()
-            if found:
-                link_q = await session.execute(
-                    select(BookAuthor).where(
-                        and_(
-                            BookAuthor.book_id == found.id,
-                            BookAuthor.author_id == author_id,
-                            BookAuthor.role == "author",
+    try:
+        for field, value in (
+            (Book.isbn13, book.get("isbn13")),
+            (Book.isbn, book.get("isbn")),
+            (Book.asin, book.get("asin")),
+        ):
+            if value:
+                q = await session.execute(
+                    select(Book).where(field == value).order_by(Book.created_at.asc())
+                )
+                found = q.scalars().first()
+                if found:
+                    link_q = await session.execute(
+                        select(BookAuthor).where(
+                            and_(
+                                BookAuthor.book_id == found.id,
+                                BookAuthor.author_id == author_id,
+                                BookAuthor.role == "author",
+                            )
                         )
                     )
-                )
-                is_cross = link_q.scalar_one_or_none() is None
-                return found, is_cross
+                    is_cross = link_q.scalar_one_or_none() is None
+                    return found, is_cross
 
-    # Phase 2: author-scoped title fallback; include soft-deleted rows so the
-    # caller's guard can prevent re-creation of intentionally deleted books.
-    tkey = normalize_title_key(book["title"])
-    q = await session.execute(
-        select(Book)
-        .join(BookAuthor, Book.id == BookAuthor.book_id)
-        .where(
-            and_(
-                BookAuthor.author_id == author_id,
-                BookAuthor.role == "author",
+        # Phase 2: author-scoped title fallback; include soft-deleted rows so the
+        # caller's guard can prevent re-creation of intentionally deleted books.
+        tkey = normalize_title_key(book["title"])
+        q = await session.execute(
+            select(Book)
+            .join(BookAuthor, Book.id == BookAuthor.book_id)
+            .where(
+                and_(
+                    BookAuthor.author_id == author_id,
+                    BookAuthor.role == "author",
+                )
             )
         )
-    )
-    for candidate in q.scalars().all():
-        if normalize_title_key(candidate.title) == tkey:
-            return candidate, False
+        for candidate in q.scalars().all():
+            if normalize_title_key(candidate.title) == tkey:
+                return candidate, False
+    except Exception:
+        logger.exception(
+            "_find_existing_book failed",
+            extra={"author_id": author_id, "title": book.get("title")},
+        )
+        raise
     return None, False
 
 
@@ -608,8 +642,9 @@ async def _find_author(session: AsyncSession, name: str) -> Author | None:
     if author:
         return author
 
-    # 3b. Fuzzy fallback
-    all_result = await session.execute(select(Author))
+    # 3b. Fuzzy fallback — O(n) scan, capped as a safety valve
+    logger.warning("_find_author falling back to full-table fuzzy match", extra={"name": name})
+    all_result = await session.execute(select(Author).limit(1000))
     for existing in all_result.scalars():
         if author_names_match(name, existing.name):
             return existing
@@ -618,51 +653,18 @@ async def _find_author(session: AsyncSession, name: str) -> Author | None:
 
 
 async def _get_or_create_author(session: AsyncSession, name: str) -> Author:
-    # 1. Exact match (fast, indexed path)
-    result = await session.execute(select(Author).where(Author.name == name))
-    author = result.scalar_one_or_none()
+    """Find an existing Author or create a new one.
+
+    Delegates lookup to ``_find_author`` so the resolution sequence
+    (exact → alias → normalised key → fuzzy) is defined in one place.
+    """
+    author = await _find_author(session, name)
     if author:
         await _record_alias(session, author, name, "scan")
         return author
 
-    # 2. Check the aliases table for a previously seen variant
-    alias_q = await session.execute(
-        select(AuthorAlias).where(AuthorAlias.alias == name)
-    )
-    alias_row = alias_q.scalar_one_or_none()
-    if alias_row:
-        author_q = await session.execute(
-            select(Author).where(Author.id == alias_row.author_id)
-        )
-        author = author_q.scalar_one_or_none()
-        if author:
-            return author
-
-    # 3. Normalised-key lookup — single indexed SQL query covering punctuation
-    #    and spacing variants (e.g. "J.N. Chaney" ↔ "J. N. Chaney" both map
-    #    to "jnchaney").  Replaces the previous O(n) full-table scan for this
-    #    class of variants.
-    key = normalize_author_key(name)
-    norm_result = await session.execute(
-        select(Author).where(Author.name_normalized == key)
-    )
-    author = norm_result.scalar_one_or_none()
-    if author:
-        await _record_alias(session, author, name, "scan")
-        return author
-
-    # 3b. Full fuzzy-match fallback for initial-expansion variants not handled
-    #     by the normalised key (e.g. "J.N. Chaney" ↔ "John N. Chaney").
-    #     TODO v0.51.0: replace with pg_trgm trigram index to eliminate this
-    #     remaining O(n) scan path.
-    all_result = await session.execute(select(Author))
-    for existing in all_result.scalars():
-        if author_names_match(name, existing.name):
-            await _record_alias(session, existing, name, "scan")
-            return existing
-
-    # 4. No match — create a new author row and seed its canonical name as
-    #    the first alias.
+    # No match — create a new author row and seed its canonical name as
+    # the first alias.
     author = Author(name=name, name_sort=sort_name(name), name_normalized=normalize_author_key(name))
     session.add(author)
     await session.flush()  # populate author.id

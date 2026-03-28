@@ -59,6 +59,7 @@ _DEFAULT: dict = {
         "host": "0.0.0.0",
         "port": 8000,
         "secret_key": "bookscout-secret-key-change-in-production",
+        "cors_origins": ["*"],
     },
     "postprocess": {
         # "bookscout" = BookScout extracts and moves files into author/series/book layout
@@ -165,3 +166,12 @@ def get_config() -> SimpleNamespace:
     if _config is None:
         _config = load_config()
     return _config
+
+
+def _reset_config(override: Optional[SimpleNamespace] = None) -> None:
+    """Reset the singleton so the next ``get_config()`` call reloads.
+
+    Pass *override* to inject a specific config object (useful in tests).
+    """
+    global _config
+    _config = override

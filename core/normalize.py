@@ -121,28 +121,32 @@ def author_names_match(search_name: str, book_author: str) -> bool:
     return False
 
 
+_SERIES_PATTERNS = [
+    re.compile(r"\(([^)]+?)\s*#(\d+(?:\.\d+)?)\)", re.IGNORECASE),
+    re.compile(r"\(([^)]+?),?\s*Book\s+(\d+(?:\.\d+)?)\)", re.IGNORECASE),
+    re.compile(r"\(([^)]+?),?\s*Vol\.?\s+(\d+(?:\.\d+)?)\)", re.IGNORECASE),
+    re.compile(r"\(([^)]+?)\s*-\s*Book\s+(\d+(?:\.\d+)?)\)", re.IGNORECASE),
+    re.compile(r"^(.+?):\s*Book\s+(\d+(?:\.\d+)?)\s*[-:]", re.IGNORECASE),
+    re.compile(r"^(.+?)\s*#(\d+(?:\.\d+)?)\s*[-:]", re.IGNORECASE),
+    re.compile(r"(.+?)\s+Book\s+(\d+(?:\.\d+)?)$", re.IGNORECASE),
+    re.compile(r"(.+?)\s+#(\d+(?:\.\d+)?)$", re.IGNORECASE),
+]
+
+_SERIES_CLEAN_RE = re.compile(r"^[-:\s]+|[-:\s]+$")
+
+
 def extract_series_from_title(title: str) -> tuple[str, str | None, str | None]:
     """Parse a book title and return ``(clean_title, series_name, position)``.
 
     Returns the original title unchanged when no series pattern is detected.
     """
-    patterns = [
-        r"\(([^)]+?)\s*#(\d+(?:\.\d+)?)\)",
-        r"\(([^)]+?),?\s*Book\s+(\d+(?:\.\d+)?)\)",
-        r"\(([^)]+?),?\s*Vol\.?\s+(\d+(?:\.\d+)?)\)",
-        r"\(([^)]+?)\s*-\s*Book\s+(\d+(?:\.\d+)?)\)",
-        r"^(.+?):\s*Book\s+(\d+(?:\.\d+)?)\s*[-:]",
-        r"^(.+?)\s*#(\d+(?:\.\d+)?)\s*[-:]",
-        r"(.+?)\s+Book\s+(\d+(?:\.\d+)?)$",
-        r"(.+?)\s+#(\d+(?:\.\d+)?)$",
-    ]
-    for pattern in patterns:
-        m = re.search(pattern, title, re.IGNORECASE)
+    for compiled in _SERIES_PATTERNS:
+        m = compiled.search(title)
         if m:
             series = m.group(1).strip()
             position = m.group(2)
-            clean = re.sub(pattern, "", title, flags=re.IGNORECASE).strip()
-            clean = re.sub(r"^[-:\s]+|[-:\s]+$", "", clean).strip()
+            clean = compiled.sub("", title).strip()
+            clean = _SERIES_CLEAN_RE.sub("", clean).strip()
             if len(clean) < 3:
                 clean = title
             return clean, series, position

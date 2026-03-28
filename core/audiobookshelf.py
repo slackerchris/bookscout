@@ -37,6 +37,11 @@ def _clean_abs_title(title: str) -> str:
 
 logger = logging.getLogger(__name__)
 
+# Cache ABS author ID resolutions to avoid re-fetching and re-scanning the
+# full /authors list on every scan.  Key: (abs_url, lib_id, normalized_author_name)
+# Value: ABS author ID string.  Cleared on worker restart.
+_abs_author_id_cache: dict[tuple[str, str, str], str] = {}
+
 # Author name strings that appear in ABS metadata but are not real authors.
 _NOISE_AUTHORS: frozenset[str] = frozenset({
     "others", "various", "various authors", "unknown", "unknown author",
@@ -159,20 +164,24 @@ async def fetch_abs_books_for_author(
 
             lib_id = library["id"]
 
-            # ── Resolve ABS author ID ──────────────────────────────────────
-            ar = await client.get(
-                f"{abs_url}/api/libraries/{lib_id}/authors",
-                headers=headers,
-                timeout=10,
-            )
-            if ar.status_code != 200:
-                continue
+            # ── Resolve ABS author ID (cached) ─────────────────────────────
+            cache_key = (abs_url, lib_id, normalize_author_name(author_name))
+            abs_author_id: str | None = _abs_author_id_cache.get(cache_key)
 
-            abs_author_id: str | None = None
-            for abs_author in ar.json().get("authors", []):
-                if author_names_match(author_name, abs_author.get("name", "")):
-                    abs_author_id = abs_author["id"]
-                    break
+            if abs_author_id is None:
+                ar = await client.get(
+                    f"{abs_url}/api/libraries/{lib_id}/authors",
+                    headers=headers,
+                    timeout=10,
+                )
+                if ar.status_code != 200:
+                    continue
+
+                for abs_author in ar.json().get("authors", []):
+                    if author_names_match(author_name, abs_author.get("name", "")):
+                        abs_author_id = abs_author["id"]
+                        _abs_author_id_cache[cache_key] = abs_author_id
+                        break
 
             if not abs_author_id:
                 continue

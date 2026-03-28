@@ -40,6 +40,7 @@ class BookOut(BaseModel):
     narrator: str | None = None
     score: int
     confidence_band: str
+    score_reasons: str | None = None
     language: str | None = None
     have_it: bool
     deleted: bool

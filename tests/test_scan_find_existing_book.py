@@ -91,13 +91,16 @@ async def test_phase1_asin_hit(session):
 
 
 @pytest.mark.asyncio
-async def test_phase1_skips_deleted_row(session):
-    """A soft-deleted book must not be returned by Phase 1."""
+async def test_phase1_returns_deleted_row(session):
+    """Phase 1 intentionally returns soft-deleted rows so the caller's
+    ``if existing and existing.deleted: continue`` guard can prevent
+    re-creation of intentionally deleted books (v0.61.1 behaviour)."""
     author = await _make_author(session)
     await _make_book(session, author, isbn13="9780000000001", deleted=True)
     book_dict = {"title": "Test Book", "isbn13": "9780000000001", "isbn": None, "asin": None}
     found, is_cross = await _find_existing_book(session, author.id, book_dict)
-    assert found is None
+    assert found is not None
+    assert found.deleted is True
 
 
 @pytest.mark.asyncio

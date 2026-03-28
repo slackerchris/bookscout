@@ -31,6 +31,11 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     conn = op.get_bind()
 
+    # NOTE: Each GROUP BY + HAVING query performs a full table scan per
+    # identifier column.  At ~2,000 books this completes in milliseconds.
+    # If the books table grows to 100K+ rows, consider adding a partial
+    # index on each identifier column WHERE identifier IS NOT NULL to
+    # speed up the grouping.
     for identifier_col in ("asin", "isbn13", "isbn"):
         # Find groups of duplicate books sharing this identifier
         dupes = conn.execute(

@@ -1,5 +1,85 @@
 # BookScout Changelog
 
+## [0.62.0] - 2026-03-28
+
+Code-review remediation covering 25 issues across security, correctness,
+performance, and code quality.
+
+### Security
+- **CORS origins now configurable** (#24) — `allow_origins` reads from
+  `config.server.cors_origins` instead of hard-coding `["*"]`.  Default remains
+  `["*"]` for homelab compatibility; set
+  `cors_origins: ["https://your-domain.com"]` under `server:` to lock it down.
+- **Bearer-token authentication middleware** (#4) — All endpoints except
+  `/health`, `/docs`, `/redoc`, and `/openapi.json` now require
+  `Authorization: Bearer <token>` when `server.secret_key` is changed from the
+  default placeholder.
+- **Input validation on `SearchRequest.query`** (#25) — Pydantic `Field`
+  constraints enforce `min_length=1`, `max_length=500`, and a character-class
+  pattern so malformed or oversized queries are rejected with 422 before
+  reaching Prowlarr/Jackett.
+
+### Fixed
+- **Stale version string** (#1) — `main.py` now reads `VERSION` at import time
+  instead of hard-coding the app version.
+- **`REFACTOR_PLAN.md` contradicted code** (#2) — Deleted-row section rewritten
+  to document the final v0.61.1 behaviour (Phase 1 intentionally includes
+  deleted rows; caller skip-guard is correct).
+- **Non-deterministic `.first()` in `_find_existing_book`** (#3) — Added
+  `.order_by(Book.created_at.asc())` so the oldest row always wins.
+- **Single-row commit loop aborted entire scan** (#5) — Persist loop wrapped in
+  per-book `try/except` with `await session.rollback()` on failure; books are
+  flushed in batches of 50.
+- **Fuzzy queries without safety valve** (#6) — Both fuzzy-fallback paths in
+  `_find_existing_book` now `.limit(1000)` with a `logger.warning` on entry.
+- **Duplicated `_find_author` / `_get_or_create_author`** (#7) —
+  `_get_or_create_author` delegates to `_find_author` first, eliminating code
+  duplication.
+- **Co-author reconcile race condition** (#8) — Added `SELECT … FOR UPDATE` on
+  the book row before reconciling co-authors.
+- **ABS author-ID fetched on every scan** (#9) — Module-level
+  `_abs_author_id_cache` avoids redundant `/api/libraries/{id}/authors` calls.
+- **SSE connections never time out** (#10) — 30-minute max connection duration
+  with a `connection.timeout` event before closing.
+- **Config singleton not resettable in tests** (#11) — Added `_reset_config()`
+  for test-time injection.
+- **Inline `import json` in `confidence.py`** (#12) — Moved to top-level
+  imports.
+- **Regex compiled on every call in `normalize.py`** (#13) — Series-extraction
+  patterns pre-compiled as `_SERIES_PATTERNS` and `_SERIES_CLEAN_RE` at module
+  level.
+- **`score_reasons` missing from `BookOut` schema** (#15) — Added
+  `score_reasons: str | None = None` to the Pydantic response model.
+- **Migration `0002` performance note** (#16) — Added a comment about full
+  table scans in the deduplication migration.
+- **Deprecated `get_event_loop()`** (#17) — `workers/tasks.py` switched to
+  `asyncio.get_running_loop()`.
+- **O(n²) author matching in `abs.py`** (#18) — `sync_books` now builds an
+  O(1) `_author_key_index` dict keyed by `normalize_author_key()`, falling back
+  to fuzzy only on miss.
+- **Silent swallow of DB errors in `_find_existing_book`** (#19) — Entire body
+  wrapped in `try/except` with `logger.exception` + re-raise so failures are
+  visible.
+
+### Added
+- **`ScanResult` TypedDict** (#20) — `scan_author_by_id` return type changed
+  from `dict[str, Any]` to a typed `ScanResult` dict.
+- **Docker resource limits** (#14) — `deploy.resources.limits` added to all
+  four Compose services: API (512 M / 1 CPU), worker (1 G / 2 CPU), postgres
+  (512 M / 1 CPU), redis (256 M / 0.5 CPU).
+- **Merge & series-extraction test coverage** (#21) — New
+  `tests/test_merge.py` with 18 tests for `merge_books()` and
+  `extract_series_from_title()`.  Fixed stale
+  `test_phase1_skips_deleted_row` → `test_phase1_returns_deleted_row`.
+
+### Removed
+- **`CONFIDENCE_INTEGRATION.py`** (#23) — Dead Flask integration code (113
+  lines) deleted.
+
+### Changed
+- **`TECHNICAL_PAPER.md` slimmed** (#22) — 607-line stale v0.29.4 document
+  replaced with a ~55-line archival appendix pointing to `ARCHITECTURE.md`.
+
 ## [0.61.3] - 2026-03-28
 
 ### Fixed

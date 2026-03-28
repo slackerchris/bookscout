@@ -41,11 +41,19 @@ async def _generate(request: Request) -> AsyncGenerator[str, None]:
     await pubsub.subscribe("bookscout:events")
 
     last_heartbeat = asyncio.get_event_loop().time()
+    connected_at = last_heartbeat
+    max_duration = 30 * 60  # 30 minutes
 
     try:
         while True:
             # Client disconnect detection
             if await request.is_disconnected():
+                break
+
+            # Maximum connection duration guard
+            now = asyncio.get_event_loop().time()
+            if now - connected_at >= max_duration:
+                yield "data: {\"event\": \"connection.timeout\"}\n\n"
                 break
 
             msg = await pubsub.get_message(
@@ -56,7 +64,6 @@ async def _generate(request: Request) -> AsyncGenerator[str, None]:
                 text = raw.decode() if isinstance(raw, bytes) else raw
                 yield f"data: {text}\n\n"
             else:
-                now = asyncio.get_event_loop().time()
                 if now - last_heartbeat >= 30:
                     yield ": heartbeat\n\n"
                     last_heartbeat = now

@@ -23,6 +23,7 @@ Scoring rules (v1):
   Suspicious edition mismatch -25    (abridged, illustrated edition, etc.)
 """
 
+import json
 import re
 import unicodedata
 from typing import Optional
@@ -134,7 +135,6 @@ def _count_sources(book: dict) -> int:
         return len(src)
     if isinstance(src, str) and src.startswith("["):
         # stored as JSON-ish list string
-        import json
         try:
             parsed = json.loads(src.replace("'", '"'))
             return len(parsed) if isinstance(parsed, list) else 1
