@@ -27,7 +27,7 @@ from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from confidence import score_books
-from core.audiobookshelf import check_audiobookshelf
+from core.audiobookshelf import fetch_abs_books_for_author
 from core.merge import merge_books
 from core.metadata import (
     query_audnexus,
@@ -199,26 +199,41 @@ async def scan_author_by_id(
         all_books = merge_books(list(source_results))
         all_books = score_books(all_books, search_author=author_name)
 
-        # ABS ownership + series — up to 4 concurrent checks to speed up
-        # prolific-author scans while staying well under ABS rate limits.
+        # ── ABS ownership: one bulk fetch for this author, then local match ──
+        # This replaces per-title searches (N HTTP calls → 1–2 calls total).
+        abs_owned = await fetch_abs_books_for_author(
+            client, author_name, abs_url, abs_token
+        )
+        logger.info(
+            "ABS ownership loaded",
+            extra={"author": author_name, "abs_owned_count": len(abs_owned)},
+        )
+
+        # Audible series fallback — still concurrent for books with no series data
         abs_sem = asyncio.Semaphore(4)
 
         async def _enrich_book(book: dict[str, Any]) -> None:
-            async with abs_sem:
-                has_it, abs_series, abs_pos = await check_audiobookshelf(
-                    client, book["title"], author_name, abs_url, abs_token
-                )
-            book["have_it"] = has_it
-            if abs_series:
-                book["series"] = abs_series
-                book["series_position"] = abs_pos
-            elif not has_it and not book.get("series"):
-                aud_series, aud_pos = await search_audible_metadata_direct(
-                    client, book["title"], author_name
-                )
-                if aud_series:
-                    book["series"] = aud_series
-                    book["series_position"] = aud_pos
+            key = normalize_title_key(book["title"])
+            abs_match = abs_owned.get(key)
+            if abs_match:
+                book["have_it"] = True
+                if abs_match["series_name"]:
+                    book["series"] = abs_match["series_name"]
+                    book["series_position"] = abs_match["series_position"]
+                # Prefer ABS ASIN over metadata-API ASIN when available
+                if abs_match["asin"] and not book.get("asin"):
+                    book["asin"] = abs_match["asin"]
+            else:
+                book["have_it"] = False
+                # Audible fallback for series info on unowned books
+                if not book.get("series"):
+                    async with abs_sem:
+                        aud_series, aud_pos = await search_audible_metadata_direct(
+                            client, book["title"], author_name
+                        )
+                    if aud_series:
+                        book["series"] = aud_series
+                        book["series_position"] = aud_pos
 
         await asyncio.gather(*(_enrich_book(b) for b in all_books))
 
@@ -324,9 +339,12 @@ async def scan_author_by_id(
                     )
                 )
 
-            # ABS is authoritative for ownership — always sync have_it and match_method.
-            existing.have_it = have_it_bool
+            # Only upgrade have_it — never downgrade it.  ABS search returns
+            # False for "not found" AND for fuzzy-match misses, so a False result
+            # is not a reliable confirmation that the book is absent.  The
+            # filesystem scanner is the correct tool for clearing ownership.
             if have_it_bool:
+                existing.have_it = True
                 existing.match_method = "audiobookshelf"
 
             # ABS series data is authoritative; overwrite when ABS provides it.

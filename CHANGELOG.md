@@ -1,5 +1,27 @@
 # BookScout Changelog
 
+## [0.61.2] - 2026-03-27
+
+### Added
+- **Bulk ABS ownership check per author scan** — `fetch_abs_books_for_author()`
+  fetches all Audiobookshelf library items for an author in one paginated pass
+  using the ABS author-filter API (`/api/libraries/{id}/items?filter=authors.<id>`)
+  instead of issuing a separate search request per book.  For a prolific author
+  with 300 books this reduces ABS HTTP calls from 300+ down to 2–3, eliminates
+  per-title fuzzy-match failures, and captures series and ASIN data directly from
+  the filtered results.
+
+### Fixed
+- **`have_it` is never downgraded by a metadata rescan** — The previous fix in
+  0.61.1 guarded the case where ABS was unconfigured; this fix covers the
+  configured case as well.  ABS's per-title search returns `False` for both
+  "book not found" and "fuzzy match failed", so a `False` result is not a
+  reliable confirmation of absence.  `have_it` is now only ever set to `True`
+  by a metadata scan; clearing ownership is the responsibility of the filesystem
+  scanner (`scan_library_path`), which does a reliable directory walk.
+
+---
+
 ## [0.61.1] - 2026-03-27
 
 ### Fixed

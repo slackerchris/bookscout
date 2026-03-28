@@ -9,7 +9,7 @@ import re
 
 import httpx
 
-from core.normalize import abs_search_title, normalize_author_name
+from core.normalize import abs_search_title, normalize_author_name, normalize_title_key
 
 # Matches role annotations appended to author names in ABS metadata, e.g.:
 #   "Christopher Tolkien - editor"
@@ -115,6 +115,115 @@ async def check_audiobookshelf(
         logger.error("ABS ownership check failed", extra={"title": book_title, "author": author_name, "error": str(exc)})
 
     return False, None, None
+
+
+async def fetch_abs_books_for_author(
+    client: httpx.AsyncClient,
+    author_name: str,
+    abs_url: str,
+    abs_token: str,
+) -> dict[str, dict]:
+    """Fetch all ABS library items for *author_name* in one paginated pass.
+
+    Finds the ABS-internal author ID via ``/api/libraries/{id}/authors``, then
+    pages through ``/api/libraries/{id}/items?filter=authors.<base64_id>`` to
+    retrieve only that author's items rather than searching per-title.
+
+    Returns a dict mapping ``normalize_title_key(title)`` → metadata dict::
+
+        {
+            "series_name": str | None,
+            "series_position": str | None,
+            "asin": str | None,
+        }
+
+    An empty dict is returned when ABS is not configured, the author is not
+    found in any library, or communication fails.
+    """
+    import base64
+
+    if not abs_url or not abs_token:
+        return {}
+
+    headers = {"Authorization": f"Bearer {abs_token}"}
+    result: dict[str, dict] = {}
+
+    try:
+        r = await client.get(f"{abs_url}/api/libraries", headers=headers, timeout=10)
+        if r.status_code != 200:
+            return {}
+
+        for library in r.json().get("libraries", []):
+            if library.get("mediaType") not in (None, "book"):
+                continue
+
+            lib_id = library["id"]
+
+            # ── Resolve ABS author ID ──────────────────────────────────────
+            ar = await client.get(
+                f"{abs_url}/api/libraries/{lib_id}/authors",
+                headers=headers,
+                timeout=10,
+            )
+            if ar.status_code != 200:
+                continue
+
+            abs_author_id: str | None = None
+            for abs_author in ar.json().get("authors", []):
+                if author_names_match(author_name, abs_author.get("name", "")):
+                    abs_author_id = abs_author["id"]
+                    break
+
+            if not abs_author_id:
+                continue
+
+            # ── Page through items filtered to this author ─────────────────
+            filter_val = base64.b64encode(abs_author_id.encode()).decode()
+            page, limit, total_processed = 0, 100, 0
+
+            while True:
+                ir = await client.get(
+                    f"{abs_url}/api/libraries/{lib_id}/items",
+                    params={"filter": f"authors.{filter_val}", "limit": limit, "page": page},
+                    headers=headers,
+                    timeout=30,
+                )
+                if ir.status_code != 200:
+                    break
+
+                data = ir.json()
+                items: list[dict] = data.get("results", [])
+                if not items:
+                    break
+
+                for item in items:
+                    meta = item.get("media", {}).get("metadata", {})
+                    raw_title = meta.get("title", "").strip()
+                    if not raw_title:
+                        continue
+                    title = _clean_abs_title(raw_title)
+                    series_list: list[dict] = meta.get("series", []) or []
+                    sn = series_list[0].get("name") if series_list else None
+                    sp = series_list[0].get("sequence") if series_list else None
+                    key = normalize_title_key(title)
+                    result[key] = {
+                        "series_name": sn,
+                        "series_position": sp,
+                        "asin": meta.get("asin") or None,
+                    }
+
+                total_processed += len(items)
+                if total_processed >= data.get("total", 0):
+                    break
+                page += 1
+
+    except Exception as exc:
+        logger.error(
+            "ABS author books fetch failed",
+            extra={"author": author_name, "error": str(exc)},
+        )
+
+    return result
 
 
 async def get_all_authors_from_audiobookshelf(
