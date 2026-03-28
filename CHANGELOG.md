@@ -1,5 +1,10 @@
 # BookScout Changelog
 
+## [0.62.5] - 2026-03-28
+
+### Changed
+- Bump version to ensure image tag uniquely identifies the new ASIN-first matching logic. No code changes from 0.62.4, just a version/tag update for deployment traceability.
+
 ## [0.62.4] - 2026-03-28
 
 ### Fixed
@@ -656,10 +661,10 @@ performance, and code quality.
 ### Changed
 - **`core/scan.py` — `_get_or_create_author()`** — full alias resolution
   pipeline: (1) exact `Author.name` match, (2) `author_aliases` table
-  lookup for a previously seen variant, (3) fuzzy `author_names_match()`
-  scan as last resort.  Every variant that passes through the function is
-  recorded in `author_aliases` via the new `_record_alias()` helper, so
-  future lookups hit step 2 (alias table) instead of the linear scan.
+  lookup for a previously seen variant, (3) fuzzy `author_names_match()` scan as
+  last resort.  Every variant that passes through the function is recorded in
+  `author_aliases` via the new `_record_alias()` helper, so future lookups hit
+  step 2 (alias table) instead of the linear scan.
 - **`core/scan.py` — new `_record_alias()` helper** — inserts an
   `AuthorAlias` row if `(author_id, alias)` is not already present.
 - **`books.asin` unique constraint dropped** — Amazon ASINs are not globally
