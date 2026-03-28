@@ -217,12 +217,19 @@ async def scan_author_by_id(
             extra={"author": author_name, "abs_owned_count": len(abs_owned)},
         )
 
+        # Secondary index by ASIN for books whose ABS title key doesn't align
+        # with the metadata-API title (e.g. ABS stores "Series: Book" but the
+        # API returns just "Book").
+        abs_owned_by_asin: dict[str, dict] = {
+            v["asin"]: v for v in abs_owned.values() if v.get("asin")
+        }
+
         # Audible series fallback — still concurrent for books with no series data
         abs_sem = asyncio.Semaphore(4)
 
         async def _enrich_book(book: dict[str, Any]) -> None:
             key = normalize_title_key(book["title"])
-            abs_match = abs_owned.get(key)
+            abs_match = abs_owned.get(key) or abs_owned_by_asin.get(book.get("asin") or "")
             if abs_match:
                 book["have_it"] = True
                 if abs_match["series_name"]:
@@ -244,6 +251,20 @@ async def scan_author_by_id(
                         book["series_position"] = aud_pos
 
         await asyncio.gather(*(_enrich_book(b) for b in all_books))
+
+        abs_matched = sum(1 for b in all_books if b.get("have_it"))
+        if abs_owned and abs_matched < len(abs_owned):
+            unmatched_keys = set(abs_owned) - {normalize_title_key(b["title"]) for b in all_books}
+            if unmatched_keys:
+                logger.warning(
+                    "ABS ownership: some owned titles did not match any scanned book",
+                    extra={
+                        "author": author_name,
+                        "abs_owned": len(abs_owned),
+                        "matched": abs_matched,
+                        "unmatched_abs_keys": sorted(unmatched_keys)[:20],
+                    },
+                )
 
     # ------------------------------------------------------------------ persist
     new_books = 0
@@ -270,10 +291,18 @@ async def scan_author_by_id(
                 if n and not _is_contributor_only(n)
             ]
             narrator_str: str | None = ", ".join(narrator_names) if narrator_names else None
+            # Build a normalised key set from all narrator names so we can exclude
+            # them from the co-author list.  Some APIs (Audnexus) put narrators in
+            # the authors array without a role suffix, which would otherwise cause
+            # every narrator lookup to trigger an expensive full-table fuzzy scan.
+            _narrator_keys: frozenset[str] = frozenset(
+                normalize_author_key(n) for n in (book.get("narrators") or []) if n
+            )
             co_authors = [
                 a for a in (book.get("authors") or [])
                 if not author_names_match(author_name, a)
                 and not _is_contributor_only(a)
+                and normalize_author_key(a) not in _narrator_keys
             ]
             all_scan_co_names.update(co_authors)
             published_year = _parse_year(book.get("release_date"))

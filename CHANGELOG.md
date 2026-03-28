@@ -1,5 +1,23 @@
 # BookScout Changelog
 
+## [0.62.2] - 2026-03-28
+
+### Fixed
+- **Narrators incorrectly searched as co-authors** — APIs such as Audnexus include
+  narrator names in the `authors` array without a role suffix.  `_is_contributor_only`
+  had no way to identify bare names like "Mark Boyett" as narrators, so every book
+  with that narrator triggered a full-table fuzzy `_find_author` scan.  The co-author
+  filter now builds a normalised-key set from `book["narrators"]` and excludes any
+  author entry whose key matches, eliminating the spurious fuzzy lookups entirely.
+- **`have_it` not set when ABS title differs from metadata-API title** — ABS
+  ownership was looked up using `normalize_title_key(book["title"])` only.  When ABS
+  stores a book as e.g. `"Undying Mercenaries: Extinction"` but the metadata API
+  returns `"Extinction"`, the keys don't match and `have_it` stays `False`.
+  A secondary ASIN-based index (`abs_owned_by_asin`) is now checked as a fallback,
+  so any book whose ASIN appears in the ABS result set is correctly marked owned
+  regardless of title formatting.  A warning log is also emitted when ABS titles
+  remain unmatched (showing the unmatched keys for diagnosis).
+
 ## [0.62.1] - 2026-03-28
 
 ### Fixed
