@@ -324,14 +324,22 @@ async def scan_author_by_id(
                     )
                 )
 
-            # COALESCE: only fill in fields that are currently empty
+            # ABS is authoritative for ownership — always sync have_it and match_method.
+            existing.have_it = have_it_bool
             if have_it_bool:
-                existing.have_it = True
                 existing.match_method = "audiobookshelf"
 
+            # ABS series data is authoritative; overwrite when ABS provides it.
+            # For all other fields coalesce: only fill in fields that are currently empty.
+            abs_series = book.get("series")
+            abs_pos = book.get("series_position")
+            if abs_series:
+                existing.series_name = abs_series
+                existing.series_position = abs_pos
+            elif not existing.series_name and abs_pos:
+                existing.series_position = abs_pos
+
             for attr, new_val in (
-                ("series_name", book.get("series")),
-                ("series_position", book.get("series_position")),
                 ("cover_url", book.get("cover_url")),
                 ("subtitle", book.get("subtitle")),
                 ("description", book.get("description")),
@@ -503,7 +511,8 @@ async def _find_existing_book(
     contributor.  The calling code is responsible for adding that link and
     removing any stale ``role='co-author'`` row for the same person.
     """
-    # Phase 1: global identifier lookup — no author filter; skip soft-deleted rows
+    # Phase 1: global identifier lookup — no author filter; include soft-deleted rows
+    # so the caller's guard can prevent re-creation of intentionally deleted books.
     for field, value in (
         (Book.isbn13, book.get("isbn13")),
         (Book.isbn, book.get("isbn")),
@@ -511,7 +520,7 @@ async def _find_existing_book(
     ):
         if value:
             q = await session.execute(
-                select(Book).where(field == value, Book.deleted.is_(False))
+                select(Book).where(field == value)
             )
             found = q.scalar_one_or_none()
             if found:
@@ -527,9 +536,8 @@ async def _find_existing_book(
                 is_cross = link_q.scalar_one_or_none() is None
                 return found, is_cross
 
-    # Phase 2: author-scoped title fallback; skip soft-deleted rows.
-    # Match by normalised title key so that "(Unabridged)" / verbose subtitle
-    # variants of the same book resolve to the same existing row.
+    # Phase 2: author-scoped title fallback; include soft-deleted rows so the
+    # caller's guard can prevent re-creation of intentionally deleted books.
     tkey = normalize_title_key(book["title"])
     q = await session.execute(
         select(Book)
@@ -538,7 +546,6 @@ async def _find_existing_book(
             and_(
                 BookAuthor.author_id == author_id,
                 BookAuthor.role == "author",
-                Book.deleted.is_(False),
             )
         )
     )

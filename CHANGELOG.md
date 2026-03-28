@@ -1,5 +1,29 @@
 # BookScout Changelog
 
+## [0.61.1] - 2026-03-27
+
+### Fixed
+- **Soft-deleted books no longer resurrect on rescan** — `_find_existing_book`
+  previously excluded deleted rows from both the identifier lookup (Phase 1)
+  and the title fallback (Phase 2), so a deleted book was invisible to the scan
+  loop and a brand-new row was silently inserted instead.  Both phases now
+  include deleted rows; the existing caller-side guard (`if existing and
+  existing.deleted: continue`) correctly suppresses re-creation.
+
+- **`have_it` now always reflects ABS during rescan** — The existing-book
+  update path only ever set `have_it = True` when ABS returned a match; it
+  never reset it to `False`.  ABS is now treated as authoritative: every
+  rescan writes the live ABS result, so removing a book from Audiobookshelf
+  and rescanning will correctly flip `have_it` back to `False`.
+
+- **ABS series data overwrites stale metadata on rescan** — Series name and
+  position for an existing book were previously coalesced (only written when
+  empty), so updated series info from ABS was silently ignored.  ABS series
+  data now always overwrites; non-series fields retain coalesce behaviour to
+  preserve manual edits.
+
+---
+
 ## [0.61.0] - 2026-03-27
 
 ### Added
