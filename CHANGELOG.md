@@ -1,5 +1,17 @@
 # BookScout Changelog
 
+## [0.62.3] - 2026-03-28
+
+### Fixed
+- **`have_it` still false when ABS stores titles with series subtitle** — The
+  secondary ASIN fallback added in 0.62.2 only fires when the metadata API
+  returns an ASIN.  ABS titles formatted as `"Blood Magic: Haven Series, Book 5"`
+  produce a normalised key `"blood magichaven series book 5"` (both colon-parts
+  joined) which never matches the API title key `"blood magic"`.  The ABS result
+  dict now also indexes the pre-colon portion (`"blood magic"`) as a secondary
+  key, covering all title-format mismatches without needing an ASIN in the API
+  result.
+
 ## [0.62.2] - 2026-03-28
 
 ### Fixed

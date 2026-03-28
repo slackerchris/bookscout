@@ -214,12 +214,21 @@ async def fetch_abs_books_for_author(
                     series_list: list[dict] = meta.get("series", []) or []
                     sn = series_list[0].get("name") if series_list else None
                     sp = series_list[0].get("sequence") if series_list else None
-                    key = normalize_title_key(title)
-                    result[key] = {
+                    entry = {
                         "series_name": sn,
                         "series_position": sp,
                         "asin": meta.get("asin") or None,
                     }
+                    key = normalize_title_key(title)
+                    result[key] = entry
+                    # ABS often stores titles as "Book Title: Series Name, Book N".
+                    # The metadata APIs return just "Book Title", so the full
+                    # normalize_title_key (which keeps both colon-parts) won't match.
+                    # Index by the pre-colon portion as a secondary key.
+                    if ":" in title:
+                        short_key = normalize_title_key(title.split(":")[0].strip())
+                        if short_key and short_key != key and short_key not in result:
+                            result[short_key] = entry
 
                 total_processed += len(items)
                 if total_processed >= data.get("total", 0):
