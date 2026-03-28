@@ -228,8 +228,12 @@ async def scan_author_by_id(
         abs_sem = asyncio.Semaphore(4)
 
         async def _enrich_book(book: dict[str, Any]) -> None:
-            key = normalize_title_key(book["title"])
-            abs_match = abs_owned.get(key) or abs_owned_by_asin.get(book.get("asin") or "")
+            # ASIN is an exact unique identifier — check it first.
+            # Fall back to normalised title key for books without an ASIN.
+            abs_match = (
+                abs_owned_by_asin.get(book.get("asin") or "")
+                or abs_owned.get(normalize_title_key(book["title"]))
+            )
             if abs_match:
                 book["have_it"] = True
                 if abs_match["series_name"]:

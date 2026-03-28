@@ -1,5 +1,16 @@
 # BookScout Changelog
 
+## [0.62.4] - 2026-03-28
+
+### Fixed
+- **`have_it` false when Audnexus returns short title and ABS stores long title** —
+  Audnexus returns `"Discovery"` (short title) with `"Red Company"` as the series
+  field; `merge_books` keeps the shorter title, so `book["title"]` = `"Discovery"`
+  → key `"discovery"` — which never matches any ABS key.  `_enrich_book` now
+  tries a third lookup: `normalize_title_key(f"{series}: {title}")` when the
+  plain-title lookup misses and the book has a known series, composing
+  `"Red Company: Discovery"` which matches the full ABS key correctly.
+
 ## [0.62.3] - 2026-03-28
 
 ### Fixed
