@@ -181,6 +181,58 @@ async def list_coauthors(
     ]
 
 
+@router.get("/favorites", response_model=dict, summary="List favourite author IDs")
+async def list_favorites(
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return ``{"author_ids": [...]}`` — the set of author IDs marked as
+    favourites.  Stored server-side so the list survives browser clears."""
+    result = await session.execute(
+        select(Watchlist.author_id).where(Watchlist.favorite.is_(True))
+    )
+    return {"author_ids": [r[0] for r in result.fetchall()]}
+
+
+@router.post(
+    "/{author_id}/favorite",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Mark author as favourite",
+)
+async def add_favorite(
+    author_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    await _get_or_404(session, author_id)
+    wl_q = await session.execute(
+        select(Watchlist).where(Watchlist.author_id == author_id)
+    )
+    wl = wl_q.scalar_one_or_none()
+    if not wl:
+        raise HTTPException(status_code=404, detail="Watchlist entry not found")
+    wl.favorite = True
+    await session.commit()
+
+
+@router.delete(
+    "/{author_id}/favorite",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Unmark author as favourite",
+)
+async def remove_favorite(
+    author_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    await _get_or_404(session, author_id)
+    wl_q = await session.execute(
+        select(Watchlist).where(Watchlist.author_id == author_id)
+    )
+    wl = wl_q.scalar_one_or_none()
+    if not wl:
+        raise HTTPException(status_code=404, detail="Watchlist entry not found")
+    wl.favorite = False
+    await session.commit()
+
+
 @router.get("/count", response_model=dict, summary="Count watched authors")
 async def count_authors(
     active_only: bool = True,

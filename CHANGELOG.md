@@ -1,5 +1,15 @@
 # BookScout Changelog
 
+## [0.65.0] - 2026-03-28
+
+### Added
+- **Server-side author favourites** — `watchlist.favorite` boolean column (migration 0008) persists favourite status in the database so it survives browser clears and works across devices.
+  - `GET /authors/favorites` → `{"author_ids": [...]}`
+  - `POST /authors/{id}/favorite` → marks the author's watchlist entry as favourite (204)
+  - `DELETE /authors/{id}/favorite` → unmarks (204)
+
+---
+
 ## [0.64.0] - 2026-03-28
 
 ### Added

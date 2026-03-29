@@ -136,6 +136,7 @@ class Watchlist(Base):
     last_scanned = Column(TIMESTAMP(timezone=True))
     next_scan    = Column(TIMESTAMP(timezone=True))
     scan_enabled = Column(Boolean, server_default="true", nullable=False)
+    favorite     = Column(Boolean, server_default="false", nullable=False)
     created_at   = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     author = relationship("Author", back_populates="watchlist_entry")
