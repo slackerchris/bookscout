@@ -1,5 +1,12 @@
 # BookScout Changelog
 
+## [0.65.1] - 2026-03-29
+
+### Fixed
+- **Confidence score not reflecting ABS-sourced ASIN** — books whose ASIN came from AudioBookShelf (not from Audnexus/API sources) were scored before `_enrich_with_abs()` ran, so the `asin_present` (+40) and `audiobook_format_match` (+20) bonuses were never applied.  The book would be saved with a correct ASIN in the database but a stale low-confidence score.  Fix: rescore all books immediately after ABS enrichment so the final score always reflects the full picture.  Affected books (e.g. "Rogue World" by B.V. Larson) will move from low → medium/high on the next scan.
+
+---
+
 ## [0.65.0] - 2026-03-28
 
 ### Added

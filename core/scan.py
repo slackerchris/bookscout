@@ -190,6 +190,11 @@ async def scan_author_by_id(
     async with httpx.AsyncClient() as client:
         books = await _fetch_metadata(client, author_name, cfg, redis_client)
         books = await _enrich_with_abs(client, books, author_name, cfg)
+        # Re-score after ABS enrichment: ABS may have added an ASIN that
+        # wasn't present when _fetch_metadata scored the books, so the
+        # asin_present (+40) and audiobook_format_match (+20) bonuses
+        # would otherwise be missing for books matched via ABS.
+        books = score_books(books, search_author=author_name)
 
     new_books, updated_books, discovered, discovered_coauthors = await _persist_scan_results(
         session, author_id, author_name, books, cfg
