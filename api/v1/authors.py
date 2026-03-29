@@ -181,6 +181,48 @@ async def list_coauthors(
     ]
 
 
+@router.get(
+    "/unwatched",
+    response_model=list[AuthorOut],
+    summary="List authors not yet on the watchlist",
+)
+async def list_unwatched(
+    session: AsyncSession = Depends(get_session),
+) -> list[Author]:
+    """Return authors imported from ABS that have no watchlist entry yet.
+    These are candidates for the user to manually add to the watchlist."""
+    result = await session.execute(
+        select(Author)
+        .outerjoin(Watchlist, Watchlist.author_id == Author.id)
+        .where(Watchlist.id.is_(None), Author.active.is_(True))
+        .order_by(Author.name_sort)
+    )
+    return list(result.scalars().all())
+
+
+@router.post(
+    "/{author_id}/watch",
+    response_model=AuthorOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add author to watchlist",
+)
+async def watch_author(
+    author_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> Author:
+    """Create a watchlist entry for an author imported without one."""
+    author = await _get_or_404(session, author_id)
+    existing = await session.execute(
+        select(Watchlist).where(Watchlist.author_id == author_id)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Author is already on the watchlist")
+    session.add(Watchlist(author_id=author_id))
+    await session.commit()
+    await session.refresh(author)
+    return author
+
+
 @router.get("/favorites", response_model=dict, summary="List favourite author IDs")
 async def list_favorites(
     session: AsyncSession = Depends(get_session),

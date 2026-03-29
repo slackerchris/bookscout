@@ -60,7 +60,7 @@ async def import_authors(session: AsyncSession = Depends(get_session)) -> dict:
         author = Author(name=name, name_sort=sort_name(name), name_normalized=normalize_author_key(name))
         session.add(author)
         await session.flush()
-        session.add(Watchlist(author_id=author.id))
+        # Do NOT add to watchlist here — user reviews and watches manually via the UI.
         existing_names.append(name)  # guard against two variants in the same batch
         added += 1
 
