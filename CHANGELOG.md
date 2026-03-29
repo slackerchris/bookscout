@@ -1,5 +1,12 @@
 # BookScout Changelog
 
+## [0.66.3] - 2026-03-29
+
+### Fixed
+- **`scan.complete` event now always published** — previously the event was only published when `books_found > 0`, so scans that found no new books produced no SSE signal.  The UI relies on this event to clear the scanning spinner; zero-result scans left the button stuck in the loading state indefinitely.  The event is now always published regardless of result count.
+
+---
+
 ## [0.66.2] - 2026-03-29
 
 ### Fixed

@@ -752,19 +752,18 @@ async def _publish_events(
     """Publish scan.complete and coauthor.discovered events to Redis pub/sub."""
     if not redis_client:
         return
-    if books_found:
-        await redis_client.publish(
-            "bookscout:events",
-            json.dumps({
-                "event": "scan.complete",
-                "author_id": author_id,
-                "author_name": author_name,
-                "books_found": books_found,
-                "new_books": new_books,
-                "updated_books": updated_books,
-                "discovered": discovered,
-            }),
-        )
+    await redis_client.publish(
+        "bookscout:events",
+        json.dumps({
+            "event": "scan.complete",
+            "author_id": author_id,
+            "author_name": author_name,
+            "books_found": books_found,
+            "new_books": new_books,
+            "updated_books": updated_books,
+            "discovered": discovered,
+        }),
+    )
     if discovered_coauthors:
         await redis_client.publish(
             "bookscout:events",
