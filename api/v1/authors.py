@@ -326,6 +326,7 @@ async def list_authors(
         .outerjoin(bc_sq, bc_sq.c.author_id == Author.id)
         .outerjoin(oc_sq, oc_sq.c.author_id == Author.id)
     )
+    q = q.where(Watchlist.id.is_not(None))
     if active_only:
         q = q.where(Author.active.is_(True))
     if search:
