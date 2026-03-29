@@ -1,5 +1,13 @@
 # BookScout Changelog
 
+## [0.66.1] - 2026-03-29
+
+### Fixed
+- **`GET /authors/` returned all authors instead of watchlisted only** — the query used an `outerjoin` on `Watchlist` with no `WHERE watchlist.id IS NOT NULL` filter, so all authors were returned regardless of watch status.  Added the missing filter so the endpoint only returns authors with an active watchlist entry.
+- **ABS import still auto-added authors to watchlist** — `session.add(Watchlist(...))` was present in the import handler despite the intended removal.  Removed; import now creates `Author` rows only.
+
+---
+
 ## [0.66.0] - 2026-03-29
 
 ### Added
