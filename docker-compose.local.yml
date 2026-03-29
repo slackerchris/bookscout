@@ -1,0 +1,32 @@
+# Local full-stack override — builds both images from source instead of
+# pulling from GHCR.  Use alongside docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml --profile ui up --build
+#
+# Or set COMPOSE_FILE in .env so you don't have to type it every time:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.local.yml
+#
+services:
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: bookscout:local
+
+  bookscout:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: bookscout:local
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: bookscout:local
+
+  ui:
+    build:
+      context: ../bookscout-ui
+      dockerfile: Dockerfile
+    image: bookscout-ui:local

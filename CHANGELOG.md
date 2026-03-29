@@ -1,5 +1,18 @@
 # BookScout Changelog
 
+## [0.66.0] - 2026-03-29
+
+### Added
+- **`app_settings` table** (migration 0009) — generic key/value store for persisting small server-side state.
+- **`GET /audiobookshelf/import-result`** — returns the last ABS author import result stored in `app_settings`.  Returns `{}` on a fresh database so the UI correctly shows the blank "Import" state instead of stale localStorage data.
+- **`GET /authors/unwatched`** — lists authors imported from ABS that have no watchlist entry, so the UI can present them for manual review.
+- **`POST /authors/{id}/watch`** — creates a watchlist entry for an existing author (HTTP 201).
+
+### Changed
+- **`POST /audiobookshelf/import-authors`** no longer auto-creates `Watchlist` entries.  Authors are imported as `Author` rows only; the user adds them to the watchlist manually via the new UI.  The import result (added/skipped counts and timestamp) is now persisted to `app_settings` so it survives page reloads without relying on `localStorage`.
+
+---
+
 ## [0.65.1] - 2026-03-29
 
 ### Fixed
