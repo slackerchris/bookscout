@@ -1,5 +1,33 @@
 # BookScout Changelog
 
+## [0.63.0] - 2026-03-28
+
+### Changed
+- **Refactored `core/scan.py`** — `scan_author_by_id` was a 447-line god function; it is now a ~40-line orchestrator that delegates to clearly-named phase functions.  No behaviour was changed.
+
+  New functions extracted from the monolith:
+  - `_ScanConfig` dataclass + `_extract_config()` — replaces 29 lines of fragile `getattr` chains with a typed, default-safe config object.
+  - `_load_author()` — author DB lookup.
+  - `_fetch_metadata()` — parallel API queries, merge, and score.
+  - `_enrich_book()` — promoted from nested closure to module-level function with explicit parameters; easier to test and reason about.
+  - `_enrich_with_abs()` — ABS bulk fetch, ASIN index, concurrent enrichment, and unmatched-key debug logging.
+  - `_persist_scan_results()` — top-level persistence orchestrator.
+  - `_load_author_book_index()` — pre-loads all books for an author into a `dict[title_key → Book]` before the persist loop, replacing the previous per-book DB query in the Phase-2 title fallback (O(N) queries → 1 query + O(1) dict lookups).
+  - `_batch_resolve_names()` — resolves all co-author names in one pass before the loop, replacing per-book per-co-author DB lookups (N×M queries → M queries).
+  - `_prepare_book_fields()` — pre-computes narrator strings, co-author lists, and JSON-serialised fields once per book instead of potentially twice (insert vs. update paths).
+  - `_insert_new_book()` — new-book insertion with primary + co-author links.
+  - `_update_existing_book()` — existing-book update with coalesce logic and co-author set reconciliation.
+  - `_cleanup_language()` — soft-delete of language-mismatched unowned books.
+  - `_process_coauthor_discovery()` — watchlist check and optional auto-add for discovered co-authors.
+  - `_update_watchlist()` — stamps `last_scanned` on the watchlist entry.
+  - `_publish_events()` — Redis pub/sub event publishing.
+
+- **`_find_existing_book` Phase-2 optimisation** — accepts an optional `title_index` dict; when provided, Phase 2 is an O(1) lookup instead of a full-table Python-side scan.  Callers without a pre-built index (e.g. tests) still use the DB fallback unchanged.
+
+- **ABS unmatched debug check corrected** — the `unmatched_keys` warning now excludes books that were already matched via ASIN, preventing false positives in the debug log when a title key doesn't align but the ASIN match succeeded.
+
+- **Removed unused `Callable` import** from `core/scan.py`.
+
 ## [0.62.6] - 2026-03-28
 
 ### Changed
