@@ -1,5 +1,12 @@
 # BookScout Changelog
 
+## [0.66.2] - 2026-03-29
+
+### Fixed
+- **ABS ownership missing books when author has duplicate entries** — ABS can create multiple separate author records for the same person when metadata is inconsistent (e.g. "B. V. Larson" and "B.V. Larson" as two distinct ABS author entries).  The previous code stopped after finding the first name match, so books attributed to any additional entries were never fetched and remained incorrectly marked as missing.  Now all matching author IDs are collected and books are fetched for every one of them.  In practice this increased one author's ABS ownership from 54 → 80 books on rescan.
+
+---
+
 ## [0.66.1] - 2026-03-29
 
 ### Fixed
