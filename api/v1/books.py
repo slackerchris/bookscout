@@ -127,6 +127,8 @@ async def list_books(
             "delta since their last run."
         ),
     ),
+    limit: int = Query(500, ge=1, le=500, description="Max results to return (1–500)"),
+    offset: int = Query(0, ge=0, description="Number of results to skip"),
     session: AsyncSession = Depends(get_session),
 ) -> list[Book]:
     q = select(Book)
@@ -155,7 +157,7 @@ async def list_books(
     if updated_since is not None:
         q = q.where(Book.updated_at > updated_since)
 
-    q = q.order_by(Book.title_sort)
+    q = q.order_by(Book.title_sort).limit(limit).offset(offset)
     result = await session.execute(q)
     return list(result.scalars().all())
 

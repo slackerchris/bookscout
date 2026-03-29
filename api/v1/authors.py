@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -181,9 +181,27 @@ async def list_coauthors(
     ]
 
 
+@router.get("/count", response_model=dict, summary="Count watched authors")
+async def count_authors(
+    active_only: bool = True,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return ``{"count": N}`` — cheap alternative to fetching the full author list
+    just to read its length."""
+    q = (
+        select(func.count(Author.id))
+        .join(Watchlist, Watchlist.author_id == Author.id)
+    )
+    if active_only:
+        q = q.where(Author.active.is_(True))
+    result = await session.execute(q)
+    return {"count": result.scalar_one()}
+
+
 @router.get("/", response_model=list[AuthorDetailOut], summary="List watched authors")
 async def list_authors(
     active_only: bool = True,
+    search: str | None = Query(None, description="Filter by name (case-insensitive contains)"),
     session: AsyncSession = Depends(get_session),
 ) -> list[AuthorDetailOut]:
     # Subquery: total catalog books per author
@@ -216,6 +234,8 @@ async def list_authors(
     )
     if active_only:
         q = q.where(Author.active.is_(True))
+    if search:
+        q = q.where(Author.name.ilike(f"%{search}%"))
     q = q.order_by(Author.name_sort)
 
     result = await session.execute(q)
@@ -268,24 +288,25 @@ async def get_author(
 ) -> AuthorDetailOut:
     author = await _get_or_404(session, author_id)
 
-    book_q = await session.execute(
-        select(Book)
-        .join(BookAuthor, Book.id == BookAuthor.book_id)
-        .where(
+    # Use COUNT queries instead of loading all book rows into Python.
+    base_count = (
+        select(func.count(Book.id))
+        .join(BookAuthor, and_(
+            BookAuthor.book_id == Book.id,
             BookAuthor.author_id == author_id,
             BookAuthor.role == "author",
-            Book.deleted.is_(False),
-        )
+        ))
+        .where(Book.deleted.is_(False))
     )
-    books = list(book_q.scalars().all())
+    book_count = (await session.execute(base_count)).scalar_one()
+    owned_count = (await session.execute(base_count.where(Book.have_it.is_(True)))).scalar_one()
 
-    # Attach watchlist last_scanned
     wl_q = await session.execute(
         select(Watchlist).where(Watchlist.author_id == author_id)
     )
     wl = wl_q.scalar_one_or_none()
 
-    out = AuthorDetailOut(
+    return AuthorDetailOut(
         id=author.id,
         name=author.name,
         name_sort=author.name_sort,
@@ -293,10 +314,9 @@ async def get_author(
         openlibrary_key=author.openlibrary_key,
         active=author.active,
         last_scanned=wl.last_scanned if wl else None,
-        book_count=len(books),
-        owned_count=sum(1 for b in books if b.have_it),
+        book_count=book_count,
+        owned_count=owned_count,
     )
-    return out
 
 
 @router.patch("/{author_id}", response_model=AuthorOut, summary="Update author")

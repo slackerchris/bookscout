@@ -1,5 +1,17 @@
 # BookScout Changelog
 
+## [0.64.0] - 2026-03-28
+
+### Added
+- **`GET /books/` pagination** — accepts `limit` (1–500, default 500) and `offset` query params so the UI can fetch books in pages instead of loading the entire catalog at once.
+- **`GET /authors/count`** — lightweight endpoint returning `{"count": N}` for the authors stat card; avoids fetching the full author list just to read its length.
+- **`GET /authors/` search param** — optional `search` query parameter filters authors by name (case-insensitive `ILIKE` contains) on the database side.
+
+### Fixed
+- **`GET /authors/{id}` N+1 query** — replaced loading all book rows into Python for `len()` / `sum()` with two SQL `COUNT` queries.
+
+---
+
 ## [0.63.0] - 2026-03-28
 
 ### Changed
