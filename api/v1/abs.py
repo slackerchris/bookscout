@@ -13,7 +13,7 @@ from config import get_config
 from core.audiobookshelf import get_all_authors_from_audiobookshelf, get_all_books_from_audiobookshelf
 from core.normalize import author_names_match, normalize_author_key, normalize_title_key, sort_name, sort_title
 from core.scan import _is_contributor_only
-from db.models import AppSetting, Author, Book, BookAuthor, Watchlist
+from db.models import AppSetting, Author, Book, BookAuthor
 from db.session import get_session
 
 router = APIRouter(prefix="/audiobookshelf", tags=["audiobookshelf"])
@@ -152,7 +152,6 @@ async def sync_books(
             )
             session.add(author_obj)
             await session.flush()
-            session.add(Watchlist(author_id=author_obj.id))
             existing_authors.append(author_obj)
             _author_key_index[normalize_author_key(author_name)] = author_obj
 
