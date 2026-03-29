@@ -2,18 +2,34 @@
 from __future__ import annotations
 
 import httpx
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_config
 from core.audiobookshelf import get_all_authors_from_audiobookshelf, get_all_books_from_audiobookshelf
 from core.normalize import author_names_match, normalize_author_key, normalize_title_key, sort_name, sort_title
 from core.scan import _is_contributor_only
-from db.models import Author, Book, BookAuthor, Watchlist
+from db.models import AppSetting, Author, Book, BookAuthor, Watchlist
 from db.session import get_session
 
 router = APIRouter(prefix="/audiobookshelf", tags=["audiobookshelf"])
+
+_IMPORT_RESULT_KEY = "abs_import_result"
+
+
+@router.get(
+    "/import-result",
+    summary="Return the last ABS author import result",
+)
+async def get_import_result(session: AsyncSession = Depends(get_session)) -> dict:
+    """Return the result of the most recent ``/import-authors`` call, or
+    ``{}`` if no import has been run yet (e.g. after a fresh install)."""
+    row = await session.get(AppSetting, _IMPORT_RESULT_KEY)
+    return row.value if row else {}
 
 
 @router.post(
@@ -48,12 +64,20 @@ async def import_authors(session: AsyncSession = Depends(get_session)) -> dict:
         existing_names.append(name)  # guard against two variants in the same batch
         added += 1
 
-    await session.commit()
-    return {
+    result = {
         "imported": added,
         "skipped": len(author_names) - added,
         "total_from_abs": len(author_names),
+        "imported_at": datetime.now(timezone.utc).isoformat(),
     }
+
+    # Persist so the UI can show the last result after a page reload.
+    stmt = pg_insert(AppSetting).values(key=_IMPORT_RESULT_KEY, value=result)
+    stmt = stmt.on_conflict_do_update(index_elements=["key"], set_={"value": result, "updated_at": func.now()})
+    await session.execute(stmt)
+
+    await session.commit()
+    return result
 
 
 @router.post(

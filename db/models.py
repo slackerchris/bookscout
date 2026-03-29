@@ -8,7 +8,7 @@ the SQLite→PostgreSQL migration script in the meantime.
 """
 from sqlalchemy import (
     BigInteger, Boolean, Column, ForeignKey, Index,
-    Integer, Text, TIMESTAMP, UniqueConstraint, func,
+    Integer, JSON, String, Text, TIMESTAMP, UniqueConstraint, func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.asyncio import AsyncAttrs
@@ -125,6 +125,14 @@ class BookAuthor(Base):
 
     book   = relationship("Book",   back_populates="book_authors")
     author = relationship("Author", back_populates="book_authors")
+
+
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    key        = Column(String, primary_key=True)
+    value      = Column(JSON, nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 class Watchlist(Base):
