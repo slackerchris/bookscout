@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 # Cache ABS author ID resolutions to avoid re-fetching and re-scanning the
 # full /authors list on every scan.  Key: (abs_url, lib_id, normalized_author_name)
 # Value: ABS author ID string.  Cleared on worker restart.
-_abs_author_id_cache: dict[tuple[str, str, str], str] = {}
+_abs_author_id_cache: dict[tuple[str, str, str], list[str]] = {}
 
 # Author name strings that appear in ABS metadata but are not real authors.
 _NOISE_AUTHORS: frozenset[str] = frozenset({
@@ -164,11 +164,14 @@ async def fetch_abs_books_for_author(
 
             lib_id = library["id"]
 
-            # ── Resolve ABS author ID (cached) ─────────────────────────────
+            # ── Resolve ABS author IDs (cached) ────────────────────────────
+            # ABS can have multiple separate author entries for the same person
+            # (e.g. "B. V. Larson" and "B.V. Larson" as distinct records).
+            # Collect ALL matching IDs so books under any variant are included.
             cache_key = (abs_url, lib_id, normalize_author_name(author_name))
-            abs_author_id: str | None = _abs_author_id_cache.get(cache_key)
+            abs_author_ids: list[str] | None = _abs_author_id_cache.get(cache_key)  # type: ignore[assignment]
 
-            if abs_author_id is None:
+            if abs_author_ids is None:
                 ar = await client.get(
                     f"{abs_url}/api/libraries/{lib_id}/authors",
                     headers=headers,
@@ -177,62 +180,64 @@ async def fetch_abs_books_for_author(
                 if ar.status_code != 200:
                     continue
 
-                for abs_author in ar.json().get("authors", []):
-                    if author_names_match(author_name, abs_author.get("name", "")):
-                        abs_author_id = abs_author["id"]
-                        _abs_author_id_cache[cache_key] = abs_author_id
-                        break
+                abs_author_ids = [
+                    abs_author["id"]
+                    for abs_author in ar.json().get("authors", [])
+                    if author_names_match(author_name, abs_author.get("name", ""))
+                ]
+                _abs_author_id_cache[cache_key] = abs_author_ids  # type: ignore[assignment]
 
-            if not abs_author_id:
+            if not abs_author_ids:
                 continue
 
-            # ── Page through items filtered to this author ─────────────────
-            filter_val = base64.b64encode(abs_author_id.encode()).decode()
-            page, limit, total_processed = 0, 100, 0
+            # ── Page through items for each matching author ID ──────────────
+            for abs_author_id in abs_author_ids:
+                filter_val = base64.b64encode(abs_author_id.encode()).decode()
+                page, limit, total_processed = 0, 100, 0
 
-            while True:
-                ir = await client.get(
-                    f"{abs_url}/api/libraries/{lib_id}/items",
-                    params={"filter": f"authors.{filter_val}", "limit": limit, "page": page},
-                    headers=headers,
-                    timeout=30,
-                )
-                if ir.status_code != 200:
-                    break
+                while True:
+                    ir = await client.get(
+                        f"{abs_url}/api/libraries/{lib_id}/items",
+                        params={"filter": f"authors.{filter_val}", "limit": limit, "page": page},
+                        headers=headers,
+                        timeout=30,
+                    )
+                    if ir.status_code != 200:
+                        break
 
-                data = ir.json()
-                items: list[dict] = data.get("results", [])
-                if not items:
-                    break
+                    data = ir.json()
+                    items: list[dict] = data.get("results", [])
+                    if not items:
+                        break
 
-                for item in items:
-                    meta = item.get("media", {}).get("metadata", {})
-                    raw_title = meta.get("title", "").strip()
-                    if not raw_title:
-                        continue
-                    title = _clean_abs_title(raw_title)
-                    series_list: list[dict] = meta.get("series", []) or []
-                    sn = series_list[0].get("name") if series_list else None
-                    sp = series_list[0].get("sequence") if series_list else None
-                    entry = {
-                        "series_name": sn,
-                        "series_position": sp,
-                        "asin": meta.get("asin") or None,
-                    }
-                    key = normalize_title_key(title)
-                    result[key] = entry
-                    # ABS often stores titles as "Book Title: Series Name, Book N".
-                    # The metadata APIs return just "Book Title", so the full
-                    # normalize_title_key (which keeps both colon-parts) won't match.
-                    # Index by the pre-colon portion as a secondary key.
-                    if ":" in title:
-                        short_key = normalize_title_key(title.split(":")[0].strip())
-                        if short_key and short_key != key and short_key not in result:
-                            result[short_key] = entry
+                    for item in items:
+                        meta = item.get("media", {}).get("metadata", {})
+                        raw_title = meta.get("title", "").strip()
+                        if not raw_title:
+                            continue
+                        title = _clean_abs_title(raw_title)
+                        series_list: list[dict] = meta.get("series", []) or []
+                        sn = series_list[0].get("name") if series_list else None
+                        sp = series_list[0].get("sequence") if series_list else None
+                        entry = {
+                            "series_name": sn,
+                            "series_position": sp,
+                            "asin": meta.get("asin") or None,
+                        }
+                        key = normalize_title_key(title)
+                        result[key] = entry
+                        # ABS often stores titles as "Book Title: Series Name, Book N".
+                        # The metadata APIs return just "Book Title", so the full
+                        # normalize_title_key (which keeps both colon-parts) won't match.
+                        # Index by the pre-colon portion as a secondary key.
+                        if ":" in title:
+                            short_key = normalize_title_key(title.split(":")[0].strip())
+                            if short_key and short_key != key and short_key not in result:
+                                result[short_key] = entry
 
-                total_processed += len(items)
-                if total_processed >= data.get("total", 0):
-                    break
+                    total_processed += len(items)
+                    if total_processed >= data.get("total", 0):
+                        break
                 page += 1
 
     except Exception as exc:

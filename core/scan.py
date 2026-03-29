@@ -323,7 +323,7 @@ async def _enrich_with_abs(
     abs_owned = await fetch_abs_books_for_author(client, author_name, cfg.abs_url, cfg.abs_token)
     logger.info(
         "ABS ownership loaded",
-        extra={"author": author_name, "abs_owned_count": len(abs_owned)},
+        extra={"author": author_name, "abs_owned_count": len(abs_owned), "abs_owned_keys": sorted(abs_owned.keys())},
     )
 
     # Secondary index by ASIN for books whose ABS title key doesn't align
