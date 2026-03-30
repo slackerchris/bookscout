@@ -195,14 +195,19 @@ def import_download(
     errors: list[str] = []
 
     # ── Step 1: gather candidate roots ──────────────────────────────────────
+    audio_files: list[Path] = []
+
     if source.is_file():
         if source.suffix.lower() in ARCHIVE_EXTENSIONS:
             extract_dir = _extract_archive(source, source.parent / "_bookscout_work")
             work_dirs.append(extract_dir)
             extracted = True
+        elif source.suffix.lower() in AUDIO_EXTENSIONS:
+            # Single audio file — copy it directly; do NOT scan the parent
+            # directory (which may contain unrelated torrents).
+            audio_files.append(source)
         else:
-            # Single audio file — treat its parent as the work dir
-            work_dirs.append(source.parent)
+            errors.append(f"Unrecognised file type: {source.suffix}")
     else:
         work_dirs.append(source)
 
@@ -213,8 +218,7 @@ def import_download(
             work_dirs.append(extract_dir)
             extracted = True
 
-    # ── Step 3: collect all audio files from all work dirs ──────────────────
-    audio_files: list[Path] = []
+    # ── Step 3: collect all audio files from directories ────────────────────
     for wd in work_dirs:
         audio_files.extend(_collect_audio_files(wd))
 

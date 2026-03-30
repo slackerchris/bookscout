@@ -1,5 +1,12 @@
 # BookScout Changelog
 
+## [0.66.6] - 2026-03-30
+
+### Fixed
+- **Importer: single-file torrents no longer copy the entire download folder** — when `source_path` is a single audio file saved directly to the qBittorrent save directory (no subfolder), the importer previously scanned `source.parent` and copied every audiobook file it found there. It now copies only the specific file.
+
+---
+
 ## [0.66.5] - 2026-03-30
 
 ### Added
