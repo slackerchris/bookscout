@@ -27,7 +27,7 @@ _DEFAULT: dict = {
     "audiobookshelf": {"url": "", "token": ""},
     "prowlarr": {"url": "", "api_key": ""},
     "jackett": {"url": "", "api_key": ""},
-    "n8n": {"url": ""},
+    "n8n": {"url": "", "api_key": ""},
     "apis": {"google_books_key": "", "isbndb_key": ""},
     "download": {
         "preferred": "",
@@ -140,6 +140,8 @@ def _apply_env_overrides(data: dict) -> dict:
         data["scan"]["cache_ttl_hours"] = int(v)
     if v := env.get("N8N_URL"):
         data["n8n"]["url"] = v
+    if v := env.get("N8N_API_KEY"):
+        data["n8n"]["api_key"] = v
 
     return data
 

@@ -1,5 +1,13 @@
 # BookScout Changelog
 
+## [0.66.4] - 2026-03-29
+
+### Added
+- **`GET /api/v1/n8n/executions`** — new proxy endpoint that fetches execution history for a given n8n workflow. Extracts book-level results (name, book ID, imported/failed) from `Success Summary` / `Failure Summary` node outputs. Returns status and timestamps for each run.
+- **`n8n.api_key` config field** — optional API key for authenticating with n8n's REST API. Set via `config.yaml` or `N8N_API_KEY` env var. `docker-compose.yml` updated to pass `N8N_API_KEY` through.
+
+---
+
 ## [0.66.3] - 2026-03-29
 
 ### Fixed
@@ -334,6 +342,25 @@ performance, and code quality.
   seeding.  The importer now uses `shutil.copy2` so originals are left in
   place and torrents continue seeding uninterrupted.  The result payload key
   has been renamed from `files_moved` to `files_copied`.
+
+---
+
+## [Unreleased]
+
+### Changed
+- **Hybrid Prowlarr search restored** — removed the forced `protocol=torrent`
+  filter from Prowlarr indexer queries, so Prowlarr can once again return both
+  Usenet/NZB and torrent audiobook results when both indexer types are
+  configured.
+- **`POST /api/v1/search/download` now routes by result type** — NZB results
+  go to SABnzbd and torrent results go to the configured torrent client.
+  `DOWNLOAD_PREFERRED=sabnzbd` no longer forces torrent results into SABnzbd,
+  which makes mixed-result hybrid setups behave predictably.
+- **`GET /api/v1/search/download/queue` now supports hybrid setups** — when
+  both SABnzbd and a torrent client are configured, the endpoint returns a
+  combined queue instead of only the queue from the preferred client. Queue
+  items now include a `client` field (`sabnzbd`, `qbittorrent`, or
+  `transmission`) so consumers can distinguish the source downloader.
 
 ---
 

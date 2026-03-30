@@ -122,6 +122,7 @@ from api.v1.health import router as health_router
 from api.v1.search import router as search_router
 from api.v1.abs import router as abs_router
 from api.v1.library_paths import router as library_paths_router
+from api.v1.n8n import router as n8n_router
 
 PREFIX = "/api/v1"
 
@@ -134,3 +135,4 @@ app.include_router(webhooks_router, prefix=PREFIX)
 app.include_router(search_router, prefix=PREFIX)
 app.include_router(abs_router, prefix=PREFIX)
 app.include_router(library_paths_router, prefix=PREFIX)
+app.include_router(n8n_router, prefix=PREFIX)
