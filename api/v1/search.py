@@ -81,7 +81,7 @@ async def download(body: DownloadRequest) -> dict:
     preferred = getattr(dl, "preferred", "") if dl else ""
 
     async with httpx.AsyncClient() as client:
-        if body.type == "nzb" or preferred == "sabnzbd":
+        if body.type == "nzb":
             sabnzbd = getattr(dl, "sabnzbd", None) if dl else None
             result = await send_to_sabnzbd(
                 client,
@@ -187,12 +187,14 @@ async def download_status() -> dict:
 @router.get("/download/queue", summary="Fetch the current download client queue")
 async def download_queue() -> list[dict]:
     """
-    Returns every item currently in the configured download client's queue,
+    Returns every item currently in the configured download client queue(s),
     including progress, status, ETA, and destination path.
 
     - **SABnzbd**: active NZB slots with MB remaining + percentage
     - **qBittorrent**: all torrents with state, progress (0–100 %), ETA, save path
     - **Transmission**: all torrents with state, progress, ETA, download dir
+    - **Hybrid**: when both SABnzbd and a torrent client are configured, items
+      from both queues are returned in a single combined list
     """
     config = get_config()
     dl = getattr(config, "download", None)

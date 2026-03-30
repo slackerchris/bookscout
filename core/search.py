@@ -25,7 +25,7 @@ async def search_prowlarr(
     try:
         r = await client.get(
             f"{prowlarr_url}/api/v1/search",
-            params={"query": query, "type": "search", "categories": [3030], "protocol": "torrent"},
+            params={"query": query, "type": "search", "categories": [3030]},
             headers={"X-Api-Key": api_key},
             timeout=30,
         )
@@ -297,8 +297,29 @@ async def fetch_download_queue(
     torrent_username: str,
     torrent_password: str,
 ) -> list[dict[str, Any]]:
-    """Fetch the active download queue from whichever client is configured."""
-    if preferred == "sabnzbd":
+    """Fetch the active download queue from the configured client(s).
+
+    When both SABnzbd and a torrent client are configured, return a combined
+    queue so hybrid setups can see both Usenet and torrent jobs at once.
+    """
+    import asyncio
+
+    sab_configured = bool(sabnzbd_url and sabnzbd_key)
+    torrent_configured = bool(torrent_url)
+
+    if sab_configured and torrent_configured:
+        torrent_fetcher = (
+            _queue_transmission(client, torrent_url, torrent_username, torrent_password)
+            if torrent_type == "transmission"
+            else _queue_qbittorrent(client, torrent_url, torrent_username, torrent_password)
+        )
+        sab_queue, torrent_queue = await asyncio.gather(
+            _queue_sabnzbd(client, sabnzbd_url, sabnzbd_key),
+            torrent_fetcher,
+        )
+        return sab_queue + torrent_queue
+
+    if preferred == "sabnzbd" or (sab_configured and not torrent_configured):
         return await _queue_sabnzbd(client, sabnzbd_url, sabnzbd_key)
     if torrent_type == "transmission":
         return await _queue_transmission(client, torrent_url, torrent_username, torrent_password)
@@ -323,6 +344,7 @@ async def _queue_sabnzbd(
         slots = r.json().get("queue", {}).get("slots", [])
         return [
             {
+                "client": "sabnzbd",
                 "nzo_id": s.get("nzo_id"),
                 "title": s.get("filename"),
                 "status": s.get("status"),
@@ -364,6 +386,7 @@ async def _queue_qbittorrent(
             return []
         return [
             {
+                "client": "qbittorrent",
                 "hash": t.get("hash"),
                 "title": t.get("name"),
                 "status": t.get("state"),
@@ -415,6 +438,7 @@ async def _queue_transmission(
         _STATUS_MAP = {0: "stopped", 1: "check_wait", 2: "checking", 3: "download_wait", 4: "downloading", 5: "seed_wait", 6: "seeding"}
         return [
             {
+                "client": "transmission",
                 "hash": t.get("hashString"),
                 "title": t.get("name"),
                 "status": _STATUS_MAP.get(t.get("status", -1), "unknown"),

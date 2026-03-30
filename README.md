@@ -116,6 +116,14 @@ server:
 
 All YAML keys can be overridden with environment variables: `DATABASE_URL`, `REDIS_URL`, `AUDIOBOOKSHELF_URL`, `AUDIOBOOKSHELF_TOKEN`, `PROWLARR_URL`, `PROWLARR_API_KEY`, `JACKETT_URL`, `JACKETT_API_KEY`, `N8N_URL`, `GOOGLE_BOOKS_API_KEY`, `ISBNDB_API_KEY`, `SECRET_KEY`.
 
+If Prowlarr has both Usenet and torrent indexers configured, BookScout search
+can return a mixed audiobook result set. `POST /api/v1/search/download` routes
+NZB results to SABnzbd and torrent results to the configured torrent client.
+This means a hybrid setup does not need a single "all traffic goes here"
+download preference; routing is determined by the selected result type.
+`GET /api/v1/search/download/queue` also returns a combined queue when both
+SABnzbd and a torrent client are configured.
+
 ## API Overview
 
 | Method | Path | Description |
@@ -185,4 +193,3 @@ BookScout runs entirely on your infrastructure. It makes outbound calls only to 
 ## License
 
 Use freely. No warranty — use at your own risk.
-

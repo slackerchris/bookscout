@@ -67,6 +67,22 @@ class BookUpdate(BaseModel):
 # Routes
 # ---------------------------------------------------------------------------
 
+@router.get("/recently-imported", summary="Books most recently imported by n8n")
+async def recently_imported(
+    limit: int = Query(20, ge=1, le=100),
+    session: AsyncSession = Depends(get_session),
+) -> list[BookOut]:
+    """Return the most recently imported books (match_method='imported'), newest first."""
+    q = (
+        select(Book)
+        .where(Book.match_method == "imported", Book.deleted.is_(False))
+        .order_by(Book.updated_at.desc())
+        .limit(limit)
+    )
+    result = await session.execute(q)
+    return list(result.scalars().all())
+
+
 @router.get("/count", summary="Count books matching filter criteria")
 async def count_books(
     author_id: int | None = Query(None, description="Filter by primary author"),

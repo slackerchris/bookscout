@@ -156,4 +156,19 @@ async def import_download_task(
                 book.match_method = "imported"
                 await session.commit()
 
+        redis_client = ctx.get("redis")
+        if redis_client:
+            import json as _json
+            await redis_client.publish(
+                "bookscout:events",
+                _json.dumps({
+                    "event": "import.complete",
+                    "book_id": book_id,
+                    "book_title": title,
+                    "author_name": author_name,
+                    "destination": result.get("destination", ""),
+                    "files_copied": result.get("files_copied", []),
+                }),
+            )
+
     return {"success": True, "book_id": book_id, **result}

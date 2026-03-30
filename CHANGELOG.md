@@ -1,5 +1,13 @@
 # BookScout Changelog
 
+## [0.66.5] - 2026-03-30
+
+### Added
+- **`import.complete` SSE event** — `import_download_task` now publishes to `bookscout:events` after a successful import, with `book_id`, `book_title`, `author_name`, `destination`, and `files_copied`. The UI uses this to show toast notifications and refresh the Recently Imported list.
+- **`GET /books/recently-imported`** — returns the last N books with `match_method='imported'` sorted by `updated_at` desc. Used by the Downloads page in place of fragile n8n execution history parsing.
+
+---
+
 ## [0.66.4] - 2026-03-29
 
 ### Added
