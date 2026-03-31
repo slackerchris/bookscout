@@ -1,5 +1,12 @@
 # BookScout Changelog
 
+## [0.66.7] - 2026-03-30
+
+### Added
+- **`SCAN_LANGUAGE_FILTER` env var** — set to `en` by default in `docker-compose.yml` to filter out non-English editions. Override with `SCAN_LANGUAGE_FILTER=all` to disable.
+
+---
+
 ## [0.66.6] - 2026-03-30
 
 ### Fixed
