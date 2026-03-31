@@ -114,7 +114,34 @@ server:
   secret_key: change-me-in-production
 ```
 
-All YAML keys can be overridden with environment variables: `DATABASE_URL`, `REDIS_URL`, `AUDIOBOOKSHELF_URL`, `AUDIOBOOKSHELF_TOKEN`, `PROWLARR_URL`, `PROWLARR_API_KEY`, `JACKETT_URL`, `JACKETT_API_KEY`, `N8N_URL`, `GOOGLE_BOOKS_API_KEY`, `ISBNDB_API_KEY`, `SECRET_KEY`.
+All YAML keys can be overridden with environment variables:
+
+| Variable | YAML equivalent | Default | Notes |
+|---|---|---|---|
+| `DATABASE_URL` | `database.url` | — | PostgreSQL async DSN |
+| `REDIS_URL` | `redis.url` | — | Redis DSN |
+| `AUDIOBOOKSHELF_URL` | `audiobookshelf.url` | — | |
+| `AUDIOBOOKSHELF_TOKEN` | `audiobookshelf.token` | — | |
+| `PROWLARR_URL` | `prowlarr.url` | — | |
+| `PROWLARR_API_KEY` | `prowlarr.api_key` | — | |
+| `JACKETT_URL` | `jackett.url` | — | |
+| `JACKETT_API_KEY` | `jackett.api_key` | — | |
+| `N8N_URL` | `n8n.url` | — | |
+| `N8N_API_KEY` | `n8n.api_key` | — | Required for execution history endpoint |
+| `GOOGLE_BOOKS_API_KEY` | `apis.google_books_key` | — | |
+| `ISBNDB_API_KEY` | `apis.isbndb_key` | — | |
+| `SECRET_KEY` | `server.secret_key` | — | Bearer token for API auth |
+| `DOWNLOAD_PREFERRED` | `download.preferred` | — | `sabnzbd` or `torrent` |
+| `SABNZBD_URL` | `download.sabnzbd.url` | — | |
+| `SABNZBD_API_KEY` | `download.sabnzbd.api_key` | — | |
+| `TORRENT_URL` | `download.torrent.url` | — | |
+| `TORRENT_USERNAME` | `download.torrent.username` | — | |
+| `TORRENT_PASSWORD` | `download.torrent.password` | — | |
+| `TORRENT_CATEGORY` | `download.torrent.default_category` | — | |
+| `SCAN_LANGUAGE_FILTER` | `scan.language_filter` | `en` | `en` = English only · `all` = no filter |
+| `SCAN_CACHE_TTL_HOURS` | `scan.cache_ttl_hours` | `24` | |
+| `POSTPROCESS_MODE` | `postprocess.mode` | `client` | `bookscout` = BookScout moves files · `client` = download client handles it |
+| `POSTPROCESS_LIBRARY_ROOT` | `postprocess.library_root` | — | Required when `POSTPROCESS_MODE=bookscout` |
 
 If Prowlarr has both Usenet and torrent indexers configured, BookScout search
 can return a mixed audiobook result set. `POST /api/v1/search/download` routes
@@ -166,8 +193,8 @@ Audiobookshelf ──────► BookScout API
 ```
 
 - Register library paths so BookScout can cross-reference your actual files
-- Webhooks fire on `scan.complete`, `coauthor.discovered`
-- SSE feed (`/api/v1/events`) streams real-time scan progress
+- Webhooks fire on `scan.complete`, `coauthor.discovered`, `import.complete`
+- SSE feed (`/api/v1/events`) streams real-time scan and import progress
 
 ## Updating
 
