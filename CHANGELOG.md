@@ -1,5 +1,12 @@
 # BookScout Changelog
 
+## [0.66.8] - 2026-03-31
+
+### Changed
+- **`GET /authors/count`** — added `watched_only` query param (default `true`). When `watched_only=false`, counts all authors in the DB without filtering by watchlist membership. Used by the UI "Total authors" dashboard card.
+
+---
+
 ## [0.66.7] - 2026-03-30
 
 ### Added

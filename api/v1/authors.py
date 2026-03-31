@@ -275,19 +275,27 @@ async def remove_favorite(
     await session.commit()
 
 
-@router.get("/count", response_model=dict, summary="Count watched authors")
+@router.get("/count", response_model=dict, summary="Count authors")
 async def count_authors(
     active_only: bool = True,
+    watched_only: bool = True,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Return ``{"count": N}`` — cheap alternative to fetching the full author list
-    just to read its length."""
-    q = (
-        select(func.count(Author.id))
-        .join(Watchlist, Watchlist.author_id == Author.id)
-    )
-    if active_only:
-        q = q.where(Author.active.is_(True))
+    just to read its length.
+
+    ``watched_only=false`` counts all authors in the DB regardless of watchlist membership.
+    ``active_only`` is only applied when ``watched_only=true``.
+    """
+    if watched_only:
+        q = (
+            select(func.count(Author.id))
+            .join(Watchlist, Watchlist.author_id == Author.id)
+        )
+        if active_only:
+            q = q.where(Author.active.is_(True))
+    else:
+        q = select(func.count(Author.id))
     result = await session.execute(q)
     return {"count": result.scalar_one()}
 
