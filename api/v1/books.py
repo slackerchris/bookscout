@@ -10,11 +10,17 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_config
+from core.metadata import normalize_language_code
 from core.search import unified_search
 from db.models import Author, Book, BookAuthor
 from db.session import get_session
 
 router = APIRouter(prefix="/books", tags=["books"])
+
+
+def _normalise_book_language(book: Book) -> Book:
+    book.language = normalize_language_code(book.language)
+    return book
 
 
 # ---------------------------------------------------------------------------
@@ -67,20 +73,24 @@ class BookUpdate(BaseModel):
 # Routes
 # ---------------------------------------------------------------------------
 
-@router.get("/recently-imported", summary="Books most recently imported by n8n")
+@router.get("/recently-imported", summary="Books most recently imported")
 async def recently_imported(
     limit: int = Query(20, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
 ) -> list[BookOut]:
-    """Return the most recently imported books (match_method='imported'), newest first."""
+    """Return the most recently imported books (match_method='imported'), newest first.
+
+    Ordered by created_at (immutable insert time) rather than updated_at, which
+    changes on any subsequent metadata update and would produce incorrect ordering.
+    """
     q = (
         select(Book)
         .where(Book.match_method == "imported", Book.deleted.is_(False))
-        .order_by(Book.updated_at.desc())
+        .order_by(Book.created_at.desc())
         .limit(limit)
     )
     result = await session.execute(q)
-    return list(result.scalars().all())
+    return [_normalise_book_language(book) for book in result.scalars().all()]
 
 
 @router.get("/count", summary="Count books matching filter criteria")
@@ -175,7 +185,7 @@ async def list_books(
 
     q = q.order_by(Book.title_sort).limit(limit).offset(offset)
     result = await session.execute(q)
-    return list(result.scalars().all())
+    return [_normalise_book_language(book) for book in result.scalars().all()]
 
 
 @router.get("/{book_id}", response_model=BookOut, summary="Get a single book")
@@ -183,7 +193,8 @@ async def get_book(
     book_id: int,
     session: AsyncSession = Depends(get_session),
 ) -> Book:
-    return await _get_or_404(session, book_id)
+    book = await _get_or_404(session, book_id)
+    return _normalise_book_language(book)
 
 
 @router.patch("/{book_id}", response_model=BookOut, summary="Update book fields")
@@ -197,7 +208,7 @@ async def update_book(
         setattr(book, field, value)
     await session.commit()
     await session.refresh(book)
-    return book
+    return _normalise_book_language(book)
 
 
 @router.delete(

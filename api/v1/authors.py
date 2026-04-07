@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.metadata import normalize_language_code
 from core.normalize import normalize_author_key, sort_name
 from db.models import Author, AuthorAlias, Book, BookAuthor, Watchlist
 from db.session import get_session
@@ -114,7 +115,16 @@ async def list_author_languages(
         .group_by(Book.language)
         .order_by(func.count(Book.id).desc())
     )
-    return [LanguageCount(language=r.language, count=r.count) for r in rows.all()]
+
+    totals: dict[str | None, int] = {}
+    for row in rows.all():
+        normalized = normalize_language_code(row.language) if row.language is not None else None
+        totals[normalized] = totals.get(normalized, 0) + int(row.count)
+
+    return [
+        LanguageCount(language=lang, count=count)
+        for lang, count in sorted(totals.items(), key=lambda item: (-item[1], item[0] or ""))
+    ]
 
 
 @router.get(

@@ -82,12 +82,47 @@ _LANG_NAME_TO_ISO: dict[str, str] = {
 }
 
 
+def normalize_language_code(language: str | None) -> str | None:
+    """Normalise language identifiers to canonical ISO-639-1 codes when possible.
+
+    Handles common variants such as:
+    - ISO-639-2 codes (``eng`` -> ``en``)
+    - Full names (``english`` -> ``en``)
+    - BCP-47 tags (``en-US``/``en_GB`` -> ``en``)
+    """
+    if not language:
+        return None
+
+    raw = str(language).strip().lower().replace("_", "-")
+    if not raw:
+        return None
+    if raw == "all":
+        return "all"
+
+    if raw in _LANG_NAME_TO_ISO:
+        return _LANG_NAME_TO_ISO[raw]
+    if raw in _LANG_639_2_TO_1:
+        return _LANG_639_2_TO_1[raw]
+
+    primary = raw.split("-", 1)[0]
+    if primary in _LANG_NAME_TO_ISO:
+        return _LANG_NAME_TO_ISO[primary]
+    if primary in _LANG_639_2_TO_1:
+        return _LANG_639_2_TO_1[primary]
+    if len(primary) == 2 and primary.isalpha():
+        return primary
+
+    return raw
+
+
 async def query_openlibrary(
     client: httpx.AsyncClient,
     author_name: str,
     language_filter: str | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch up to 200 books from Open Library for *author_name*."""
+    normalized_filter = normalize_language_code(language_filter)
+
     try:
         r = await client.get(
             OPENLIBRARY_API,
@@ -111,17 +146,21 @@ async def query_openlibrary(
         # OpenLibrary uses ISO 639-2 (3-letter) codes; normalise to ISO 639-1.
         # OL rolls up all editions so a book may list multiple languages.
         raw_languages: list[str] = doc.get("language", [])
-        book_languages: list[str] = [_LANG_639_2_TO_1.get(c, c) for c in raw_languages]
+        book_languages: list[str] = [
+            code
+            for code in (normalize_language_code(c) for c in raw_languages)
+            if code and code != "all"
+        ]
         if (
-            language_filter
-            and language_filter != "all"
-            and language_filter not in book_languages
+            normalized_filter
+            and normalized_filter != "all"
+            and normalized_filter not in book_languages
         ):
             continue
         # If filtering by a specific language and the book matched, store that
         # language (not whichever OL happened to list first).
-        if language_filter and language_filter != "all" and language_filter in book_languages:
-            primary_language = language_filter
+        if normalized_filter and normalized_filter != "all" and normalized_filter in book_languages:
+            primary_language = normalized_filter
         else:
             primary_language = book_languages[0] if book_languages else None
 
@@ -154,14 +193,16 @@ async def query_google_books(
     api_key: str | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch up to 120 books (3 pages × 40) from Google Books for *author_name*."""
+    normalized_filter = normalize_language_code(language_filter)
+
     params: dict[str, Any] = {
         "q": f'inauthor:"{author_name}"',
         "maxResults": 40,
     }
     if api_key:
         params["key"] = api_key
-    if language_filter and language_filter != "all":
-        params["langRestrict"] = language_filter
+    if normalized_filter and normalized_filter != "all":
+        params["langRestrict"] = normalized_filter
 
     try:
         r = await client.get(GOOGLE_BOOKS_API, params=params, timeout=15)
@@ -210,8 +251,8 @@ async def query_google_books(
             x["type"]: x["identifier"]
             for x in vi.get("industryIdentifiers", [])
         }
-        lang = vi.get("language") or None
-        if language_filter and language_filter != "all" and lang != language_filter:
+        lang = normalize_language_code(vi.get("language"))
+        if normalized_filter and normalized_filter != "all" and lang != normalized_filter:
             continue
 
         book: dict[str, Any] = {
@@ -243,6 +284,8 @@ async def query_audnexus(
     Audible catalog API to discover audiobooks (with series data included) and
     call Audnexus ``/books/{asin}`` per result for cover, ISBN, and runtime.
     """
+    normalized_filter = normalize_language_code(language_filter)
+
     # --- Step 1: collect products from Audible catalog (paginated) -----------
     all_products: list[dict] = []
     per_page = 50
@@ -282,10 +325,9 @@ async def query_audnexus(
             # Filter by language early using the catalog-level field (requires
             # the 'media' response_group).  Audible returns full names like
             # 'english', 'polish', 'german' — normalise and compare.
-            if language_filter and language_filter != "all":
-                raw_lang = (product.get("language") or "").lower()
-                product_lang = _LANG_NAME_TO_ISO.get(raw_lang, raw_lang) if raw_lang else None
-                if product_lang and product_lang != language_filter:
+            if normalized_filter and normalized_filter != "all":
+                product_lang = normalize_language_code(product.get("language"))
+                if product_lang and product_lang != normalized_filter:
                     continue
             all_products.append(product)
 
@@ -320,8 +362,7 @@ async def query_audnexus(
 
         # Seed language from the catalog 'media' response_group so the
         # post-enrichment filter has a value even if Audnexus lookup fails.
-        catalog_lang_raw = (product.get("language") or "").lower()
-        catalog_lang = _LANG_NAME_TO_ISO.get(catalog_lang_raw, catalog_lang_raw) if catalog_lang_raw else None
+        catalog_lang = normalize_language_code(product.get("language"))
 
         book: dict[str, Any] = {
             "title": title,
@@ -353,8 +394,7 @@ async def query_audnexus(
                         detail.get("summary") or detail.get("description", "")
                     )
                     if detail.get("language"):
-                        raw_lang = detail["language"].lower()
-                        book["language"] = _LANG_NAME_TO_ISO.get(raw_lang, raw_lang)
+                        book["language"] = normalize_language_code(detail.get("language"))
                     # Audnexus seriesPrimary is the canonical source — override
                     sp = detail.get("seriesPrimary")
                     if sp:
@@ -373,8 +413,8 @@ async def query_audnexus(
         # Apply language filter (post-enrichment, since Audible API has no lang filter).
         # Books whose language is still None (Audnexus lookup failed / not in Audnexus)
         # are excluded when a filter is active rather than assumed to be English.
-        if language_filter and language_filter != "all":
-            if book["language"] != language_filter:
+        if normalized_filter and normalized_filter != "all":
+            if book["language"] != normalized_filter:
                 return None
 
         return book
@@ -393,6 +433,8 @@ async def query_isbndb(
     language_filter: str | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch books from ISBNdb (premium API key required)."""
+    normalized_filter = normalize_language_code(language_filter)
+
     if not api_key:
         return []
     try:
@@ -412,10 +454,10 @@ async def query_isbndb(
 
     books: list[dict[str, Any]] = []
     for item in data.get("books", []):
-        lang = item.get("language") or None
+        lang = normalize_language_code(item.get("language"))
         # Exclude books with unknown language when a filter is active rather than
         # assuming English.
-        if language_filter and language_filter != "all" and lang != language_filter:
+        if normalized_filter and normalized_filter != "all" and lang != normalized_filter:
             continue
         title = item.get("title", "")
         if not title:

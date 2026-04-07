@@ -1,5 +1,21 @@
 # BookScout Changelog
 
+## [0.66.10] - 2026-04-06
+
+### Fixed
+- **Language tag normalization across metadata sources** — scan ingestion now normalizes mixed provider tags (`eng`, `english`, `en-US`, `en_GB`) to canonical ISO-639-1 codes before filtering and persistence.
+- **Language cleanup correctness** — non-matching language cleanup now compares normalized values, preventing English variants from being incorrectly soft-deleted when `scan.language_filter` is `en`.
+- **Consistent API language output** — `GET /books/`, `GET /books/{id}`, `PATCH /books/{id}`, and `GET /books/recently-imported` now return normalized language codes; `GET /authors/{id}/languages` aggregates counts by normalized language.
+
+---
+
+## [0.66.9] - 2026-03-31
+
+### Fixed
+- **`GET /books/recently-imported`** — now orders by `created_at` (immutable insert timestamp) instead of `updated_at`. Previously, any metadata update to an imported book would bump it to the top of the list regardless of when it was actually imported.
+
+---
+
 ## [0.66.8] - 2026-03-31
 
 ### Changed

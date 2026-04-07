@@ -31,6 +31,7 @@ from confidence import score_books
 from core.audiobookshelf import fetch_abs_books_for_author
 from core.merge import merge_books
 from core.metadata import (
+    normalize_language_code,
     query_audnexus,
     query_google_books,
     query_isbndb,
@@ -141,8 +142,10 @@ def _extract_config(config: Any) -> _ScanConfig:
     abs_cfg = getattr(config, "audiobookshelf", None)
     sources_cfg = getattr(scan_cfg, "sources", None)
     cache_ttl_hours = int(getattr(scan_cfg, "cache_ttl_hours", 24) or 24)
+    raw_language_filter = getattr(scan_cfg, "language_filter", "en") or "en"
+    normalized_language_filter = normalize_language_code(raw_language_filter)
     cfg = _ScanConfig(
-        language_filter=getattr(scan_cfg, "language_filter", "en") or "en",
+        language_filter=normalized_language_filter or "en",
         google_api_key=getattr(apis_cfg, "google_books_key", "") or "",
         isbndb_api_key=getattr(apis_cfg, "isbndb_key", "") or "",
         abs_url=getattr(abs_cfg, "url", "") or "",
@@ -674,7 +677,8 @@ async def _cleanup_language(
     Handles books that were persisted before strict language filtering was in
     place (e.g. Polish editions written before the language filter was set).
     """
-    if not language_filter or language_filter == "all":
+    normalized_filter = normalize_language_code(language_filter)
+    if not normalized_filter or normalized_filter == "all":
         return
     result = await session.execute(
         select(Book)
@@ -683,15 +687,28 @@ async def _cleanup_language(
             Book.deleted.is_(False),
             Book.have_it.is_(False),
             Book.language.isnot(None),
-            Book.language != language_filter,
         )
     )
     for stale_book in result.scalars().all():
+        normalized_book_lang = normalize_language_code(stale_book.language)
+        # Opportunistically canonicalize persisted language codes.
+        if normalized_book_lang and normalized_book_lang != stale_book.language:
+            stale_book.language = normalized_book_lang
+
+        if not normalized_book_lang or normalized_book_lang == normalized_filter:
+            continue
+
         stale_book.deleted = True
         stale_book.updated_at = datetime.now(timezone.utc)
         logger.info(
             "Soft-deleted non-matching language book",
-            extra={"book_id": stale_book.id, "title": stale_book.title, "language": stale_book.language},
+            extra={
+                "book_id": stale_book.id,
+                "title": stale_book.title,
+                "language": stale_book.language,
+                "normalized_language": normalized_book_lang,
+                "language_filter": normalized_filter,
+            },
         )
 
 
