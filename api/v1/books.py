@@ -60,6 +60,7 @@ class BookOut(BaseModel):
 
 class BookUpdate(BaseModel):
     have_it: bool | None = None
+    language: str | None = None
     series_name: str | None = None
     series_position: str | None = None
     subtitle: str | None = None
@@ -205,6 +206,8 @@ async def update_book(
 ) -> Book:
     book = await _get_or_404(session, book_id)
     for field, value in body.model_dump(exclude_none=True).items():
+        if field == "language":
+            value = normalize_language_code(value)
         setattr(book, field, value)
     await session.commit()
     await session.refresh(book)

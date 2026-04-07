@@ -1,5 +1,15 @@
 # BookScout Changelog
 
+## [0.66.11] - 2026-04-06
+
+### Added
+- **Manual book language override** — `PATCH /books/{id}` now accepts `language` and normalizes incoming values (e.g. `english`, `eng`, `en-US` -> `en`) before persisting.
+
+### Fixed
+- **Books API language consistency on manual edits** — patched book responses continue returning normalized language codes after updates.
+
+---
+
 ## [0.66.10] - 2026-04-06
 
 ### Fixed
