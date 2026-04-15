@@ -67,6 +67,7 @@ class AuthorOut(BaseModel):
     openlibrary_key: str | None = None
     active: bool
     last_scanned: datetime | None = None
+    created_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -364,6 +365,7 @@ async def list_authors(
             last_scanned=row[1],
             book_count=row[2],
             owned_count=row[3],
+            created_at=row[0].created_at,
         )
         for row in rows
     ]
@@ -429,6 +431,7 @@ async def get_author(
         last_scanned=wl.last_scanned if wl else None,
         book_count=book_count,
         owned_count=owned_count,
+        created_at=author.created_at,
     )
 
 
