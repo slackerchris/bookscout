@@ -1,5 +1,15 @@
 # BookScout Changelog
 
+## [0.67.0] - 2026-06-04
+
+### Added
+- **OpenAPI schema export** — added `scripts/export_openapi.py` so the UI can generate TypeScript types directly from the FastAPI contract without requiring a running server.
+
+### Fixed
+- **Series parser cleanup** — series names extracted from titles like `Awakening (The Land - Book 1)` no longer keep a trailing dash.
+
+---
+
 ## [0.66.11] - 2026-04-06
 
 ### Added

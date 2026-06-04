@@ -143,7 +143,7 @@ def extract_series_from_title(title: str) -> tuple[str, str | None, str | None]:
     for compiled in _SERIES_PATTERNS:
         m = compiled.search(title)
         if m:
-            series = m.group(1).strip()
+            series = _SERIES_CLEAN_RE.sub("", m.group(1).strip()).strip()
             position = m.group(2)
             clean = compiled.sub("", title).strip()
             clean = _SERIES_CLEAN_RE.sub("", clean).strip()
