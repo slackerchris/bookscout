@@ -193,6 +193,26 @@ class WebhookDelivery(Base):
     webhook = relationship("Webhook", back_populates="deliveries")
 
 
+class DownloadAttempt(Base):
+    """Records each time a user sends a torrent/NZB to the download client (v0.68.0+)."""
+    __tablename__ = "download_attempts"
+
+    id            = Column(Integer, primary_key=True)
+    book_id       = Column(Integer, ForeignKey("books.id", ondelete="SET NULL"), nullable=True)
+    book_title    = Column(Text)             # snapshot of book title at send time
+    query         = Column(Text)             # the indexer search query
+    release_title = Column(Text, nullable=False)  # full title from the indexer result
+    indexer       = Column(Text)
+    source        = Column(Text)             # "Prowlarr" | "Jackett"
+    type          = Column(Text)             # "torrent" | "nzb"
+    size_bytes    = Column(BigInteger)
+    seeders       = Column(Integer)
+    download_url  = Column(Text)
+    status        = Column(Text, server_default="queued", nullable=False)  # queued | failed
+    error_detail  = Column(Text)
+    created_at    = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 # ---------------------------------------------------------------------------
 # Indexes (defined outside models for clarity)
 # ---------------------------------------------------------------------------

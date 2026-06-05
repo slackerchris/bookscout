@@ -2,26 +2,30 @@
 
 Headless audiobook-tracking service. Queries Open Library, Google Books, and the Audible catalog to build complete author bibliographies, scores each book by confidence, checks your Audiobookshelf library for ownership, and delivers notifications via webhooks and SSE.
 
-~~There is **no web UI** — interaction is entirely through the REST API. Interactive docs are served at `/docs` (Swagger UI) and `/redoc`.~~
-**Announcing Bookscout UI** 
-https://github.com/slackerchris/bookscout-ui
+> **Web UI available** — [bookscout-ui](https://github.com/slackerchris/bookscout-ui) is a React control panel that wraps this API. You can still use the REST API directly; interactive docs live at `/docs` (Swagger UI) and `/redoc`.
 
-You can still use the REST API. Interactive docs are served at `/docs` (Swagger UI) and `/redoc`  if do not wish to install/use *Bookscout UI*
+---
 
 ## Features
 
-- **Multi-source discovery** — Open Library, Google Books, and the Audible catalog API queried in parallel
+- **Multi-source discovery** — Open Library, Google Books, Audnexus, and ISBNdb queried in parallel
 - **Confidence scoring** — every book gets a `HIGH / MEDIUM / LOW` band with per-reason breakdown
 - **Smart deduplication** — fuzzy author matching handles initials, name variants, and inverted surnames
 - **Filesystem scanner** — watches local library paths and cross-references files against catalog results
-- **Audiobookshelf integration** — marks books owned vs. missing against your ABS library
-- **Prowlarr / Jackett search** — one-call API to open a search for any missing book
-- **Webhooks + SSE** — push `scan.complete`, `coauthor.discovered`, and custom events to n8n, Discord, Mafl, etc.
+- **Audiobookshelf integration** — marks books owned vs. missing against your ABS library; one-click bulk sync
+- **Prowlarr / Jackett search** — unified indexer search with download routing to qBittorrent, Transmission, or SABnzbd
+- **Download history** — every send-to-client action is recorded with release title, type, size, and outcome
+- **Metadata editing** — `PATCH /books/{id}` accepts full manual overrides (title, series, narrator, release date, language, identifiers)
+- **Duplicate detection** — `GET /books/duplicates` surfaces books that share a normalised title so cleanup is a one-step operation
+- **Export** — `GET /books/export` downloads the full catalog as a JSON file
+- **Webhooks + SSE** — push `scan.complete`, `coauthor.discovered`, and `import.complete` events to n8n, Discord, Mafl, etc.
 - **Scheduled scans** — cron-driven background worker (arq + Redis) rescans watchlist authors automatically
 
 ## Why BookScout?
 
 Readarr and LazyLibrarian have incomplete metadata databases. BookScout solves this by querying multiple sources in parallel, merging and deduplicating the results, and confidence-scoring each book. Example: an author with 30+ audiobooks typically returns 25–30 HIGH-confidence results where most tools show 10–15.
+
+---
 
 ## Quick Start
 
@@ -42,8 +46,8 @@ docker compose up -d
 docker compose logs -f bookscout
 ```
 
-API is available at **http://localhost:8765**
-Interactive docs at **http://localhost:8765/docs**
+API: **http://localhost:8765**  
+Docs: **http://localhost:8765/docs**
 
 ### Services started by docker-compose
 
@@ -54,6 +58,8 @@ Interactive docs at **http://localhost:8765/docs**
 | `bookscout-migrate` | Runs `alembic upgrade head` once, then exits |
 | `bookscout` | FastAPI service on port 8765 |
 | `bookscout-worker` | arq background worker (scans, webhooks) |
+
+---
 
 ## Configuration
 
@@ -73,6 +79,9 @@ prowlarr:
 scan:
   schedule_cron: "0 * * * *"   # rescan watchlist every hour
   language_filter: en           # ISO 639-1; set to "all" to disable
+
+server:
+  secret_key: change-me-in-production   # enables Bearer token auth on all endpoints
 ```
 
 ### Full config.yaml reference
@@ -97,104 +106,224 @@ jackett:
   api_key: ""
 
 n8n:
-  url: ""    # optional — enables health check in /api/v1/search/status
+  url: ""        # optional — enables health check in /api/v1/search/status
+  api_key: ""    # optional — enables n8n execution history endpoint
 
 apis:
   google_books_key: ""    # optional — raises quota from 100 to 1000 req/day
   isbndb_key: ""          # optional — enables ISBNdb source
 
+download:
+  preferred: ""           # "sabnzbd" | "torrent" — used when both are configured
+  sabnzbd:
+    url: ""
+    api_key: ""
+    default_category: ""
+  torrent:
+    type: qbittorrent     # "qbittorrent" | "transmission"
+    url: ""
+    username: ""
+    password: ""
+    default_category: ""
+    default_tag: ""
+    save_path: ""
+
+postprocess:
+  mode: client            # "client" = download client handles it
+                          # "bookscout" = BookScout extracts and organises files
+  library_root: ""        # required when mode = "bookscout"
+
 scan:
   schedule_cron: "0 * * * *"
   max_concurrent_scans: 5
   language_filter: en     # ISO 639-1 code, or "all" to accept all languages
+  cache_ttl_hours: 24
+  auto_add_coauthors: false
+  sources:
+    openlibrary: true
+    google_books: true
+    audible: true
+    isbndb: true          # only active when apis.isbndb_key is set
 
 server:
   host: 0.0.0.0
   port: 8765
   secret_key: change-me-in-production
+  cors_origins: ["*"]
 ```
+
+### Environment variable overrides
 
 All YAML keys can be overridden with environment variables:
 
-| Variable | YAML equivalent | Default | Notes |
-|---|---|---|---|
-| `DATABASE_URL` | `database.url` | — | PostgreSQL async DSN |
-| `REDIS_URL` | `redis.url` | — | Redis DSN |
-| `AUDIOBOOKSHELF_URL` | `audiobookshelf.url` | — | |
-| `AUDIOBOOKSHELF_TOKEN` | `audiobookshelf.token` | — | |
-| `PROWLARR_URL` | `prowlarr.url` | — | |
-| `PROWLARR_API_KEY` | `prowlarr.api_key` | — | |
-| `JACKETT_URL` | `jackett.url` | — | |
-| `JACKETT_API_KEY` | `jackett.api_key` | — | |
-| `N8N_URL` | `n8n.url` | — | |
-| `N8N_API_KEY` | `n8n.api_key` | — | Required for execution history endpoint |
-| `GOOGLE_BOOKS_API_KEY` | `apis.google_books_key` | — | |
-| `ISBNDB_API_KEY` | `apis.isbndb_key` | — | |
-| `SECRET_KEY` | `server.secret_key` | — | Bearer token for API auth |
-| `DOWNLOAD_PREFERRED` | `download.preferred` | — | `sabnzbd` or `torrent` |
-| `SABNZBD_URL` | `download.sabnzbd.url` | — | |
-| `SABNZBD_API_KEY` | `download.sabnzbd.api_key` | — | |
-| `TORRENT_URL` | `download.torrent.url` | — | |
-| `TORRENT_USERNAME` | `download.torrent.username` | — | |
-| `TORRENT_PASSWORD` | `download.torrent.password` | — | |
-| `TORRENT_CATEGORY` | `download.torrent.default_category` | — | |
-| `SCAN_LANGUAGE_FILTER` | `scan.language_filter` | `en` | `en` = English only · `all` = no filter |
-| `SCAN_CACHE_TTL_HOURS` | `scan.cache_ttl_hours` | `24` | |
-| `POSTPROCESS_MODE` | `postprocess.mode` | `client` | `bookscout` = BookScout moves files · `client` = download client handles it |
-| `POSTPROCESS_LIBRARY_ROOT` | `postprocess.library_root` | — | Required when `POSTPROCESS_MODE=bookscout` |
+| Variable | YAML equivalent | Notes |
+|---|---|---|
+| `DATABASE_URL` | `database.url` | PostgreSQL async DSN |
+| `REDIS_URL` | `redis.url` | Redis DSN |
+| `AUDIOBOOKSHELF_URL` | `audiobookshelf.url` | |
+| `AUDIOBOOKSHELF_TOKEN` | `audiobookshelf.token` | |
+| `PROWLARR_URL` | `prowlarr.url` | |
+| `PROWLARR_API_KEY` | `prowlarr.api_key` | |
+| `JACKETT_URL` | `jackett.url` | |
+| `JACKETT_API_KEY` | `jackett.api_key` | |
+| `N8N_URL` | `n8n.url` | |
+| `N8N_API_KEY` | `n8n.api_key` | Required for execution history endpoint |
+| `GOOGLE_BOOKS_API_KEY` | `apis.google_books_key` | |
+| `ISBNDB_API_KEY` | `apis.isbndb_key` | |
+| `SECRET_KEY` | `server.secret_key` | Bearer token for API auth |
+| `DOWNLOAD_PREFERRED` | `download.preferred` | `sabnzbd` or `torrent` |
+| `SABNZBD_URL` | `download.sabnzbd.url` | |
+| `SABNZBD_API_KEY` | `download.sabnzbd.api_key` | |
+| `SABNZBD_CATEGORY` | `download.sabnzbd.default_category` | |
+| `TORRENT_URL` | `download.torrent.url` | |
+| `TORRENT_USERNAME` | `download.torrent.username` | |
+| `TORRENT_PASSWORD` | `download.torrent.password` | |
+| `TORRENT_CATEGORY` | `download.torrent.default_category` | |
+| `TORRENT_TAG` | `download.torrent.default_tag` | |
+| `TORRENT_SAVE_PATH` | `download.torrent.save_path` | |
+| `POSTPROCESS_MODE` | `postprocess.mode` | `bookscout` or `client` |
+| `POSTPROCESS_LIBRARY_ROOT` | `postprocess.library_root` | Required when mode = `bookscout` |
+| `SCAN_LANGUAGE_FILTER` | `scan.language_filter` | `en` or `all` |
+| `SCAN_CACHE_TTL_HOURS` | `scan.cache_ttl_hours` | |
 
-If Prowlarr has both Usenet and torrent indexers configured, BookScout search
-can return a mixed audiobook result set. `POST /api/v1/search/download` routes
-NZB results to SABnzbd and torrent results to the configured torrent client.
-This means a hybrid setup does not need a single "all traffic goes here"
-download preference; routing is determined by the selected result type.
-`GET /api/v1/search/download/queue` also returns a combined queue when both
-SABnzbd and a torrent client are configured.
+---
+
+## Authentication
+
+When `server.secret_key` is set to anything other than the default placeholder, all endpoints (except `/health`, `/docs`, `/redoc`, `/openapi.json`) require:
+
+```
+Authorization: Bearer <your-secret-key>
+```
+
+If the key is left at the default, a warning is printed at startup and all endpoints are accessible without credentials. **Always set a non-default key in production.**
+
+---
 
 ## API Overview
+
+### Books
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/books` | List books (filterable by author, confidence, owned, `updated_since`) |
+| `GET` | `/api/v1/books/count` | Count books — cheap stat-card query |
+| `GET` | `/api/v1/books/summary` | Aggregate summary (total, missing, upcoming, etc.) |
+| `GET` | `/api/v1/books/recently-imported` | Books imported from the filesystem |
+| `GET` | `/api/v1/books/recently-discovered` | Books added by recent scans |
+| `GET` | `/api/v1/books/upcoming` | Books with a future release date |
+| `GET` | `/api/v1/books/export` | Download full catalog as `bookscout-export.json` |
+| `GET` | `/api/v1/books/duplicates` | Find books sharing a normalised title + author |
+| `GET` | `/api/v1/books/{id}` | Get single book |
+| `PATCH` | `/api/v1/books/{id}` | Update book metadata (title, series, narrator, release date, language, ASIN/ISBN, etc.) |
+| `DELETE` | `/api/v1/books/{id}` | Soft-delete (dismiss) a book |
+| `POST` | `/api/v1/books/{id}/search` | Search indexers for this book |
+| `POST` | `/api/v1/books/{id}/rescan` | Re-queue a metadata scan for the book's author |
+| `POST` | `/api/v1/books/{id}/import` | Import a downloaded file into the library (`postprocess.mode: bookscout` only) |
+
+### Authors
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/authors` | List watchlist authors |
+| `POST` | `/api/v1/authors` | Add author to watchlist |
+| `GET` | `/api/v1/authors/count` | Count authors |
+| `GET` | `/api/v1/authors/favorites` | List favourite author IDs |
+| `GET` | `/api/v1/authors/unwatched` | Authors imported from ABS but not on the watchlist |
+| `GET` | `/api/v1/authors/{id}` | Get author + stats |
+| `PATCH` | `/api/v1/authors/{id}` | Update author name / active status |
+| `DELETE` | `/api/v1/authors/{id}` | Remove from watchlist |
+| `POST` | `/api/v1/authors/{id}/watch` | Add existing author to watchlist |
+| `POST` | `/api/v1/authors/{id}/favorite` | Mark author as favourite |
+| `DELETE` | `/api/v1/authors/{id}/favorite` | Unmark favourite |
+| `PATCH` | `/api/v1/authors/{id}/watchlist` | Toggle `scan_enabled` |
+| `GET` | `/api/v1/authors/{id}/coauthors` | Co-authors discovered for this author |
+| `GET` | `/api/v1/authors/{id}/languages` | Per-language book count breakdown |
+| `GET` | `/api/v1/authors/{id}/preferences` | Get notes and ignore rules |
+| `PATCH` | `/api/v1/authors/{id}/preferences` | Update notes and ignore rules |
+| `GET` | `/api/v1/authors/{id}/aliases` | List all known name aliases |
+| `POST` | `/api/v1/authors/{id}/aliases` | Add a name alias |
+| `DELETE` | `/api/v1/authors/{id}/aliases/{alias_id}` | Delete an alias |
+
+### Scans
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/scans/author/{id}` | Enqueue scan for one author |
+| `POST` | `/api/v1/scans/all` | Enqueue scan for all watchlist authors |
+| `GET` | `/api/v1/scans/stats` | Scan statistics (last scan time, new books today, totals) |
+| `GET` | `/api/v1/scans/job/{job_id}` | Poll arq job status |
+
+### Search & Downloads
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/search` | Search Prowlarr + Jackett indexers |
+| `POST` | `/api/v1/search/download` | Send a result to the configured download client; records a `download_attempt` row |
+| `GET` | `/api/v1/search/status` | Check indexer, download client, and n8n connectivity |
+| `GET` | `/api/v1/search/download/queue` | Fetch the active download client queue |
+| `GET` | `/api/v1/download-history` | List recent download attempts |
+| `DELETE` | `/api/v1/download-history` | Clear all download history |
+
+### Settings
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/settings/download-preferences` | Get quality/format preferences used by the UI for search scoring |
+| `PATCH` | `/api/v1/settings/download-preferences` | Update download preferences |
+
+### Webhooks & Events
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/webhooks` | List registered webhook endpoints |
+| `POST` | `/api/v1/webhooks` | Register a webhook |
+| `DELETE` | `/api/v1/webhooks/{id}` | Deactivate a webhook |
+| `POST` | `/api/v1/webhooks/{id}/reactivate` | Re-enable a disabled webhook |
+| `POST` | `/api/v1/webhooks/{id}/test` | Send a test ping |
+| `GET` | `/api/v1/webhooks/{id}/deliveries` | Delivery log for a webhook |
+| `GET` | `/api/v1/events` | SSE stream of live events |
+
+### Audiobookshelf
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/audiobookshelf/import-authors` | Bulk-import all ABS authors into the watchlist |
+| `POST` | `/api/v1/audiobookshelf/sync-books` | Import all ABS books + enqueue metadata scans |
+| `GET` | `/api/v1/abs/status` | Audiobookshelf connection status |
+
+### Other
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Liveness probe |
-| `GET` | `/api/v1/authors` | List watchlist authors |
-| `POST` | `/api/v1/authors` | Add author to watchlist |
-| `DELETE` | `/api/v1/authors/{id}` | Remove author |
-| `GET` | `/api/v1/authors/{id}/coauthors` | Co-authors discovered for an author |
-| `GET` | `/api/v1/authors/{id}/languages` | Per-language book count breakdown |
-| `GET` | `/api/v1/books` | List books (filterable by author, confidence, owned, `updated_since`) |
-| `GET` | `/api/v1/books/count` | Count books matching filter criteria (no payload — cheap stat-card query) |
-| `PATCH` | `/api/v1/books/{id}` | Update book metadata |
-| `POST` | `/api/v1/books/{id}/search` | Search indexers for a specific book |
-| `POST` | `/api/v1/scans/author/{id}` | Enqueue scan for one author |
-| `POST` | `/api/v1/scans/all` | Enqueue scan for all watchlist authors |
-| `GET` | `/api/v1/scans/stats` | Scan statistics (last scan time, new books today, totals) |
-| `POST` | `/api/v1/search` | Search Prowlarr + Jackett indexers |
-| `POST` | `/api/v1/search/download` | Send an indexer result to your download client |
-| `GET` | `/api/v1/search/status` | Check indexer, download client, and n8n connectivity |
 | `GET` | `/api/v1/library-paths` | List filesystem library paths |
-| `POST` | `/api/v1/library-paths` | Register a new library path |
-| `POST` | `/api/v1/library-paths/{id}/scan` | Trigger filesystem scan |
-| `GET` | `/api/v1/events` | SSE stream of live events |
-| `GET` | `/api/v1/webhooks` | List registered webhook consumers |
-| `POST` | `/api/v1/webhooks` | Register a webhook endpoint |
-| `GET` | `/api/v1/abs/status` | Audiobookshelf connection status |
+| `POST` | `/api/v1/library-paths` | Register a library path |
+| `POST` | `/api/v1/library-paths/{id}/scan` | Trigger a filesystem scan |
+| `GET` | `/api/v1/n8n/executions` | Proxy n8n execution history for a workflow |
 
 Full interactive docs with request/response schemas: **http://localhost:8765/docs**
+
+---
 
 ## Homelab Integration
 
 ```
-Audiobookshelf ──────► BookScout API
+Audiobookshelf ──────► BookScout API ◄──── BookScout UI (bookscout-ui)
                               │
                ┌──────────────┼──────────────┐
                ▼              ▼              ▼
           Prowlarr        Webhooks         SSE
-        (search missing)  (n8n / Discord)  (Mafl dashboard)
+        (search missing)  (n8n / Discord)  (Mafl / dashboard)
+               │
+          qBittorrent / Transmission / SABnzbd
+        (send downloads)
 ```
 
-- Register library paths so BookScout can cross-reference your actual files
 - Webhooks fire on `scan.complete`, `coauthor.discovered`, `import.complete`
-- SSE feed (`/api/v1/events`) streams real-time scan and import progress
+- SSE feed (`/api/v1/events`) streams real-time scan and import progress to any connected client
+
+---
 
 ## Updating
 
@@ -205,17 +334,24 @@ docker compose up -d
 
 Migrations run automatically on startup via the `migrate` service.
 
+---
+
 ## Data Sources
 
 | Source | Notes |
 |---|---|
 | Open Library | Internet Archive — comprehensive, no key required |
 | Google Books | Good series metadata; optional key raises daily quota |
-| Audible catalog | Production Audible API — best audiobook coverage |
+| Audnexus | Audible catalog metadata — best audiobook coverage |
+| ISBNdb | ISBN-based lookup; requires a paid API key |
+
+---
 
 ## Privacy
 
 BookScout runs entirely on your infrastructure. It makes outbound calls only to the above public book catalog APIs. No telemetry, no tracking, no external data persistence.
+
+---
 
 ## License
 

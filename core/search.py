@@ -10,6 +10,16 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+def humanize_size(size: int | float) -> str:
+    """Return a human-readable string for a byte count (e.g. '1.23 GB')."""
+    size = size or 0
+    if size >= 1_073_741_824:
+        return f"{size / 1_073_741_824:.2f} GB"
+    if size >= 1_048_576:
+        return f"{size / 1_048_576:.2f} MB"
+    return f"{size / 1024:.1f} KB"
+
+
 # ---------------------------------------------------------------------------
 # Search
 # ---------------------------------------------------------------------------
@@ -232,7 +242,7 @@ async def _send_qbittorrent(
         payload: dict[str, str] = {"urls": download_url}
         if save_path:
             payload["savepath"] = save_path
-        elif category:
+        if category:
             payload["category"] = category
         tag_parts = [p for p in [tag, f"bookscout-{book_id}" if book_id else ""] if p]
         if tag_parts:

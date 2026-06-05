@@ -49,6 +49,13 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     arq_pool = await create_pool(RedisSettings.from_dsn(redis_url))
     application.state.arq_pool = arq_pool
 
+    secret = getattr(getattr(config, "server", None), "secret_key", _DEFAULT_SECRET)
+    if not secret or secret == _DEFAULT_SECRET:
+        logger.warning(
+            "BookScout is running with the default secret key — all API endpoints are UNAUTHENTICATED. "
+            "Set server.secret_key in config.yaml or the SECRET_KEY environment variable to enable authentication."
+        )
+
     logger.info("BookScout started", extra={"docs": "/docs"})
 
     yield
@@ -123,6 +130,8 @@ from api.v1.search import router as search_router
 from api.v1.abs import router as abs_router
 from api.v1.library_paths import router as library_paths_router
 from api.v1.n8n import router as n8n_router
+from api.v1.download_history import router as download_history_router
+from api.v1.settings import router as settings_router
 
 PREFIX = "/api/v1"
 
@@ -136,3 +145,5 @@ app.include_router(search_router, prefix=PREFIX)
 app.include_router(abs_router, prefix=PREFIX)
 app.include_router(library_paths_router, prefix=PREFIX)
 app.include_router(n8n_router, prefix=PREFIX)
+app.include_router(download_history_router, prefix=PREFIX)
+app.include_router(settings_router, prefix=PREFIX)

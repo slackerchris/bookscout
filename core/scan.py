@@ -403,44 +403,51 @@ async def _persist_scan_results(
     _BATCH_SIZE = 50
 
     for idx, (book, fields) in enumerate(zip(books, all_fields), 1):
+        existing, is_cross_author = await _find_existing_book(session, author_id, book, title_index)
+
+        # Never re-add intentionally deleted books
+        if existing and existing.deleted:
+            continue
+
+        # Accumulate after the deleted-guard so we match original behaviour
+        all_co_names.update(fields["co_authors"])
+
+        # Use a savepoint so that a failure on one book only rolls back that
+        # book's changes, not every book flushed since the last batch boundary.
+        new_book: Book | None = None
+        in_discovered = False
         try:
-            existing, is_cross_author = await _find_existing_book(session, author_id, book, title_index)
-
-            # Never re-add intentionally deleted books
-            if existing and existing.deleted:
-                continue
-
-            # Accumulate after the deleted-guard so we match original behaviour
-            all_co_names.update(fields["co_authors"])
-
-            if not existing:
-                new_book, in_discovered = await _insert_new_book(
-                    session, book, fields, author_id, co_author_cache
-                )
-                # Keep the index current so a duplicate title in the same scan
-                # batch doesn't get inserted twice.
-                title_index[normalize_title_key(book["title"])] = new_book
-                new_books += 1
-                if in_discovered:
-                    discovered.append({
-                        "title": book["title"],
-                        "author": author_name,
-                        "have_it": fields["have_it_bool"],
-                        "confidence_band": book.get("confidence_band"),
-                    })
-            else:
-                await _update_existing_book(
-                    session, existing, book, fields, author_id, is_cross_author, co_author_cache
-                )
-                updated_books += 1
-
+            async with session.begin_nested():
+                if not existing:
+                    new_book, in_discovered = await _insert_new_book(
+                        session, book, fields, author_id, co_author_cache
+                    )
+                else:
+                    await _update_existing_book(
+                        session, existing, book, fields, author_id, is_cross_author, co_author_cache
+                    )
         except Exception:
             logger.exception(
                 "Failed to persist book",
                 extra={"author_id": author_id, "title": book.get("title")},
             )
-            await session.rollback()
             continue
+
+        # Update in-memory state only after the savepoint has committed.
+        if new_book is not None:
+            # Keep the index current so a duplicate title in the same scan
+            # batch doesn't get inserted twice.
+            title_index[normalize_title_key(book["title"])] = new_book
+            new_books += 1
+            if in_discovered:
+                discovered.append({
+                    "title": book["title"],
+                    "author": author_name,
+                    "have_it": fields["have_it_bool"],
+                    "confidence_band": book.get("confidence_band"),
+                })
+        else:
+            updated_books += 1
 
         # Batch-flush every N books to bound the session identity map
         if idx % _BATCH_SIZE == 0:
@@ -482,10 +489,25 @@ async def _batch_resolve_names(
 
     When *auto_add* is True, missing authors are created; otherwise only
     already-tracked authors are returned (missing names map to None).
+
+    Bulk-fetches exact-name matches in a single query; only falls through to
+    the per-name alias/normalised-key/fuzzy lookup for names that miss.
     """
+    if not names:
+        return {}
+
     cache: dict[str, Author | None] = {}
+
+    # Single IN query covers the common case (authors already in the DB).
+    result = await session.execute(select(Author).where(Author.name.in_(names)))
+    for author in result.scalars():
+        cache[author.name] = author
+
+    # Per-name fallback only for genuine misses (alias / normalised key / fuzzy).
     for name in sorted(names):
-        cache[name] = await _get_or_create_author(session, name) if auto_add else await _find_author(session, name)
+        if name not in cache:
+            cache[name] = await _get_or_create_author(session, name) if auto_add else await _find_author(session, name)
+
     return cache
 
 
@@ -518,7 +540,16 @@ def _prepare_book_fields(book: dict[str, Any], primary_author_name: str) -> dict
         "narrator_str": narrator_str,
         "co_authors": co_authors,
         "published_year": _parse_year(book.get("release_date")),
+        "prefers_release_date": _prefers_release_date(book),
     }
+
+
+def _prefers_release_date(book: dict[str, Any]) -> bool:
+    source = book.get("source", [])
+    if isinstance(source, str):
+        source = [source]
+    sources = {str(s).lower() for s in source if s}
+    return "audnexus" in sources or "audible" in sources
 
 
 async def _insert_new_book(
@@ -630,6 +661,13 @@ async def _update_existing_book(
         if not getattr(existing, attr) and new_val:
             setattr(existing, attr, new_val)
 
+    new_release_date = book.get("release_date")
+    if new_release_date and (not existing.release_date or fields["prefers_release_date"]):
+        existing.release_date = str(new_release_date)
+
+    if existing.published_year is None and fields["published_year"] is not None:
+        existing.published_year = fields["published_year"]
+
     existing.score = book.get("score", 0)
     existing.confidence_band = book.get("confidence_band", "low")
     existing.score_reasons = fields["score_reasons_str"]
@@ -682,7 +720,11 @@ async def _cleanup_language(
         return
     result = await session.execute(
         select(Book)
-        .join(BookAuthor, and_(BookAuthor.book_id == Book.id, BookAuthor.author_id == author_id))
+        .join(BookAuthor, and_(
+            BookAuthor.book_id == Book.id,
+            BookAuthor.author_id == author_id,
+            BookAuthor.role == "author",
+        ))
         .where(
             Book.deleted.is_(False),
             Book.have_it.is_(False),

@@ -273,33 +273,52 @@ docker exec -i bookscout-postgres psql -U bookscout bookscout < bookscout-YYYY-M
 
 ```
 bookscout/
-├── main.py                  ← FastAPI entry point (uvicorn main:app)
-├── config.py                ← config.yaml loader with env-var overrides
+├── main.py                     ← FastAPI entry point (uvicorn main:app)
+├── config.py                   ← config.yaml loader with env-var overrides
+├── confidence.py               ← Confidence scoring engine
+├── VERSION                     ← Current release version
 ├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
-├── bookscout.service        ← systemd template
-├── api/v1/                  ← Route handlers
+├── bookscout.service           ← systemd template
+├── api/v1/                     ← Route handlers
 │   ├── authors.py
-│   ├── books.py
+│   ├── books.py                ← includes /export, /duplicates, /{id}/rescan
 │   ├── scans.py
-│   ├── events.py            ← SSE stream
+│   ├── events.py               ← SSE stream
 │   ├── webhooks.py
-│   ├── search.py
+│   ├── search.py               ← Prowlarr + Jackett; records download_attempts
+│   ├── download_history.py     ← GET/POST/DELETE /download-history/
+│   ├── settings.py             ← GET/PATCH /settings/download-preferences
 │   ├── abs.py
 │   ├── library_paths.py
+│   ├── n8n.py
 │   └── health.py
 ├── core/
-│   ├── metadata.py          ← Multi-source catalog queries
-│   ├── merge.py             ← Deduplication logic
-│   ├── normalize.py         ← Author name normalisation + matching
-│   ├── confidence.py        ← Confidence scoring engine
-│   └── scanner.py           ← Filesystem scanner
+│   ├── metadata.py             ← Multi-source catalog queries
+│   ├── merge.py                ← Deduplication logic
+│   ├── normalize.py            ← Author name normalisation + matching
+│   ├── scan.py                 ← Scan pipeline orchestrator
+│   ├── scanner.py              ← Filesystem scanner
+│   ├── audiobookshelf.py       ← ABS API client
+│   ├── importer.py             ← Post-download file organiser
+│   └── search.py               ← Prowlarr / Jackett / download client helpers
 ├── db/
-│   ├── models.py            ← SQLAlchemy async models
-│   ├── session.py           ← Async session factory
-│   └── alembic/             ← Migration scripts
+│   ├── models.py               ← SQLAlchemy async models
+│   ├── session.py              ← Async session factory
+│   └── migrations/             ← Alembic migration scripts
+│       └── versions/
+│           ├── 0001_initial_schema.py
+│           ├── 0002_deduplicate_books.py
+│           ├── 0003_author_aliases.py
+│           ├── 0004_webhook_retry.py
+│           ├── 0005_book_language.py
+│           ├── 0006_author_name_normalized.py
+│           ├── 0007_book_narrator.py
+│           ├── 0008_author_favorites.py
+│           ├── 0009_app_settings.py
+│           └── 0010_download_history.py
 └── workers/
-    ├── settings.py          ← arq WorkerSettings
-    └── tasks.py             ← scan_author_task, scan_all_authors_task, …
+    ├── settings.py             ← arq WorkerSettings
+    └── tasks.py                ← scan_author_task, scan_all_authors_task, import_download_task
 ```

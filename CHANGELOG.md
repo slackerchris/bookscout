@@ -1,5 +1,27 @@
 # BookScout Changelog
 
+## [0.68.0] - 2026-06-04
+
+### Added
+- **Extended book editing** — `PATCH /books/{id}` now accepts `title` (auto-regenerates `title_sort`), `narrator`, and `release_date` in addition to the existing fields, enabling full metadata correction from the UI.
+- **Rescan single book** — `POST /books/{id}/rescan` enqueues a metadata scan for the book's primary author without having to navigate to the author page.
+- **Book export** — `GET /books/export` returns all non-deleted books with author info as a downloadable `bookscout-export.json` file.
+- **Duplicate detection** — `GET /books/duplicates` returns groups of two or more books that share a normalised title and the same primary author, making it easy to spot and clean up duplicates that accumulated across scan cycles.
+- **Download history** — new `download_attempts` table (migration 0010) records every send-to-client action with release title, type, size, seeders, and outcome. `GET /download-history/`, `POST /download-history/`, and `DELETE /download-history/` expose CRUD. `POST /search/download` now automatically creates a record on every attempt.
+- **Download quality preferences** — `GET /settings/download-preferences` and `PATCH /settings/download-preferences` persist user preferences (min seeders, preferred format, language, require-unabridged, max size) to the `app_settings` table so the UI can use them for search result scoring.
+- **Startup auth warning** — BookScout now logs a `WARNING` at startup when `server.secret_key` is still the default placeholder, making it immediately obvious in logs that all endpoints are unauthenticated.
+
+### Fixed
+- **Scan batch rollback** — a failure on one book during `_persist_scan_results` previously called `session.rollback()`, which discarded every book flushed since the last batch boundary and left the in-memory `title_index` pointing to non-existent rows. Each book is now wrapped in `async with session.begin_nested()` (a savepoint) so only the failing book is rolled back while the rest of the batch is preserved.
+- **Language cleanup deleting co-authored books** — `_cleanup_language` joined `BookAuthor` without a `role = 'author'` filter, causing books where the scanned author appears only as a co-author to be incorrectly soft-deleted. Filter added.
+- **Import path traversal** — `POST /books/{id}/import` now rejects `source_path` values that are not absolute or that contain `..` components, blocking attempts to copy arbitrary server files into the library root.
+- **Importer temp-dir leak** — the `_bookscout_work/` cleanup step checked `wd.name == '_bookscout_work'` but extraction subdirs are named after the archive stem (e.g. `_bookscout_work/audiobook/`), so the condition was never true and the temp directory was never deleted. Extraction roots are now tracked explicitly and cleaned up correctly.
+- **Case-sensitive author duplicate check** — `POST /authors` used `Author.name == body.name` (case-sensitive) allowing "Author Name" and "author name" to both be inserted as separate rows. Changed to `.ilike()`.
+- **`asyncio.get_event_loop()` deprecation in SSE** — both calls in `api/v1/events.py` replaced with `asyncio.get_running_loop()` to avoid `DeprecationWarning` on Python 3.12+.
+- **`save_path` silently dropping `category` in qBittorrent** — `_send_qbittorrent` used `elif category` after `if save_path`, meaning any request that specified both would have the category silently ignored. Changed to `if/if` so both fields are included in the payload.
+- **Sequential co-author lookups** — `_batch_resolve_names` issued up to 4 DB round-trips per co-author name serially. It now bulk-fetches all exact-name matches in a single `WHERE name IN (...)` query and only falls back to the full alias/normalised-key/fuzzy path for genuine misses.
+- **Duplicated `humanize_size` logic** — size-humanization block copy-pasted between `api/v1/search.py` and `api/v1/books.py` extracted into a shared `humanize_size()` helper in `core/search.py`.
+
 ## [0.67.0] - 2026-06-04
 
 ### Added

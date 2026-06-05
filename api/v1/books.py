@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -11,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_config
 from core.metadata import normalize_language_code
-from core.search import unified_search
+from core.normalize import normalize_title_key, sort_title
+from core.search import humanize_size, unified_search
 from db.models import Author, Book, BookAuthor
 from db.session import get_session
 
@@ -58,8 +60,14 @@ class BookOut(BaseModel):
         from_attributes = True
 
 
+class BookWithAuthorOut(BookOut):
+    author_id: int
+    author_name: str
+
+
 class BookUpdate(BaseModel):
     have_it: bool | None = None
+    title: str | None = None
     language: str | None = None
     series_name: str | None = None
     series_position: str | None = None
@@ -68,11 +76,32 @@ class BookUpdate(BaseModel):
     asin: str | None = None
     isbn: str | None = None
     isbn13: str | None = None
+    narrator: str | None = None
+    release_date: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+def _book_with_author_out(book: Book, author_id: int, author_name: str) -> BookWithAuthorOut:
+    book = _normalise_book_language(book)
+    data = BookOut.model_validate(book).model_dump()
+    return BookWithAuthorOut(**data, author_id=author_id, author_name=author_name)
+
+
+def _upcoming_release_condition(today: str):
+    """Handle both full ISO dates and older year-only release values."""
+    current_year = today[:4]
+    return and_(
+        Book.release_date.is_not(None),
+        (
+            (func.length(Book.release_date) == 4) & (Book.release_date >= current_year)
+        ) | (
+            (func.length(Book.release_date) > 4) & (Book.release_date >= today)
+        ),
+    )
+
 
 @router.get("/recently-imported", summary="Books most recently imported")
 async def recently_imported(
@@ -92,6 +121,81 @@ async def recently_imported(
     )
     result = await session.execute(q)
     return [_normalise_book_language(book) for book in result.scalars().all()]
+
+
+@router.get("/recently-discovered", response_model=list[BookWithAuthorOut], summary="Books most recently discovered")
+async def recently_discovered(
+    limit: int = Query(50, ge=1, le=200),
+    missing_only: bool = Query(False),
+    session: AsyncSession = Depends(get_session),
+) -> list[BookWithAuthorOut]:
+    """Return recently created catalog rows, newest first."""
+    q = (
+        select(Book, Author.id, Author.name)
+        .join(BookAuthor, and_(BookAuthor.book_id == Book.id, BookAuthor.role == "author"))
+        .join(Author, Author.id == BookAuthor.author_id)
+        .where(Book.deleted.is_(False))
+        .order_by(Book.created_at.desc())
+        .limit(limit)
+    )
+    if missing_only:
+        q = q.where(Book.have_it.is_(False))
+    result = await session.execute(q)
+    return [_book_with_author_out(book, author_id, author_name) for book, author_id, author_name in result.all()]
+
+
+@router.get("/upcoming", response_model=list[BookWithAuthorOut], summary="Upcoming audiobook releases")
+async def upcoming_books(
+    limit: int = Query(100, ge=1, le=500),
+    missing_only: bool = Query(True),
+    confidence_band: str | None = Query(None, description="high | medium | low"),
+    session: AsyncSession = Depends(get_session),
+) -> list[BookWithAuthorOut]:
+    """Return books with release dates today or later, ordered by release date."""
+    today = datetime.utcnow().date().isoformat()
+    q = (
+        select(Book, Author.id, Author.name)
+        .join(BookAuthor, and_(BookAuthor.book_id == Book.id, BookAuthor.role == "author"))
+        .join(Author, Author.id == BookAuthor.author_id)
+        .where(
+            Book.deleted.is_(False),
+            _upcoming_release_condition(today),
+        )
+        .order_by(Book.release_date.asc(), Book.title_sort.asc())
+        .limit(limit)
+    )
+    if missing_only:
+        q = q.where(Book.have_it.is_(False))
+    if confidence_band is not None:
+        q = q.where(Book.confidence_band == confidence_band)
+    result = await session.execute(q)
+    return [_book_with_author_out(book, author_id, author_name) for book, author_id, author_name in result.all()]
+
+
+@router.get("/summary", summary="Book catalog summary")
+async def book_summary(session: AsyncSession = Depends(get_session)) -> dict:
+    today = datetime.utcnow().date().isoformat()
+
+    async def count_where(*conditions) -> int:
+        result = await session.execute(select(func.count(Book.id)).where(Book.deleted.is_(False), *conditions))
+        return int(result.scalar_one())
+
+    total = await count_where()
+    missing = await count_where(Book.have_it.is_(False))
+    high_conf_missing = await count_where(Book.have_it.is_(False), Book.confidence_band == "high")
+    upcoming_missing = await count_where(
+        Book.have_it.is_(False),
+        _upcoming_release_condition(today),
+    )
+    no_release_date = await count_where(Book.release_date.is_(None))
+
+    return {
+        "total": total,
+        "missing": missing,
+        "high_confidence_missing": high_conf_missing,
+        "upcoming_missing": upcoming_missing,
+        "no_release_date": no_release_date,
+    }
 
 
 @router.get("/count", summary="Count books matching filter criteria")
@@ -208,6 +312,8 @@ async def update_book(
     for field, value in body.model_dump(exclude_none=True).items():
         if field == "language":
             value = normalize_language_code(value)
+        elif field == "title":
+            book.title_sort = sort_title(value)
         setattr(book, field, value)
     await session.commit()
     await session.refresh(book)
@@ -265,15 +371,125 @@ async def search_for_book(
         )
 
     for r in results:
-        size = r.get("size", 0) or 0
-        if size >= 1_073_741_824:
-            r["size_human"] = f"{size / 1_073_741_824:.2f} GB"
-        elif size >= 1_048_576:
-            r["size_human"] = f"{size / 1_048_576:.2f} MB"
-        else:
-            r["size_human"] = f"{size / 1024:.1f} KB"
+        r["size_human"] = humanize_size(r.get("size", 0))
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Rescan a single book's author
+# ---------------------------------------------------------------------------
+
+@router.post("/{book_id}/rescan", summary="Re-queue a metadata scan for this book's author")
+async def rescan_book(
+    book_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Enqueue a full author scan so metadata for this book is refreshed."""
+    book = await _get_or_404(session, book_id)
+
+    author_result = await session.execute(
+        select(Author)
+        .join(BookAuthor, and_(
+            BookAuthor.author_id == Author.id,
+            BookAuthor.book_id == book_id,
+            BookAuthor.role == "author",
+        ))
+    )
+    author = author_result.scalar_one_or_none()
+    if not author:
+        raise HTTPException(status_code=404, detail="No primary author found for this book")
+
+    pool = getattr(request.app.state, "arq_pool", None)
+    if pool is None:
+        raise HTTPException(status_code=503, detail="Job queue unavailable")
+
+    job = await pool.enqueue_job("scan_author_task", author.id)
+    return {
+        "job_id": job.job_id,
+        "author_id": author.id,
+        "author_name": author.name,
+        "book_id": book_id,
+        "book_title": book.title,
+        "status": "queued",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
+from fastapi.responses import Response as FastAPIResponse  # noqa: E402 (local import avoids circular)
+import json as _json
+
+
+@router.get("/export", summary="Export all books as a downloadable JSON file")
+async def export_books(
+    session: AsyncSession = Depends(get_session),
+) -> FastAPIResponse:
+    """Download all non-deleted books with author info as a JSON file."""
+    q = (
+        select(Book, Author.id, Author.name)
+        .join(BookAuthor, and_(BookAuthor.book_id == Book.id, BookAuthor.role == "author"))
+        .join(Author, Author.id == BookAuthor.author_id)
+        .where(Book.deleted.is_(False))
+        .order_by(Author.name_sort, Book.title_sort)
+    )
+    result = await session.execute(q)
+    books = []
+    for book, author_id, author_name in result.all():
+        bd = BookOut.model_validate(book).model_dump(mode="json")
+        bd["author_id"] = author_id
+        bd["author_name"] = author_name
+        books.append(bd)
+
+    payload = _json.dumps(
+        {"exported_at": datetime.utcnow().isoformat() + "Z", "total": len(books), "books": books},
+        indent=2,
+        default=str,
+    ).encode()
+
+    return FastAPIResponse(
+        content=payload,
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="bookscout-export.json"'},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Duplicate detection
+# ---------------------------------------------------------------------------
+
+@router.get("/duplicates", summary="Find likely duplicate book entries")
+async def find_duplicates(
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    """Return groups of 2+ books that share the same normalised title + primary author."""
+    q = (
+        select(Book, Author.id, Author.name)
+        .join(BookAuthor, and_(BookAuthor.book_id == Book.id, BookAuthor.role == "author"))
+        .join(Author, Author.id == BookAuthor.author_id)
+        .where(Book.deleted.is_(False))
+        .order_by(Author.name_sort, Book.title_sort)
+    )
+    result = await session.execute(q)
+
+    groups: dict[tuple, list[dict]] = {}
+    for book, author_id, author_name in result.all():
+        key = (author_id, normalize_title_key(book.title))
+        if key not in groups:
+            groups[key] = []
+        bd = BookOut.model_validate(book).model_dump(mode="json")
+        bd["author_id"] = author_id
+        bd["author_name"] = author_name
+        groups[key].append(bd)
+
+    return [
+        {"author_id": aid, "author_name": books[0]["author_name"], "books": books}
+        for (aid, _), books in sorted(groups.items(), key=lambda x: x[1][0]["author_name"])
+        if len(books) >= 2
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +528,13 @@ async def import_book(
         raise HTTPException(
             status_code=400,
             detail="postprocess.library_root is not configured.",
+        )
+
+    source = Path(body.source_path)
+    if not source.is_absolute() or ".." in source.parts:
+        raise HTTPException(
+            status_code=400,
+            detail="source_path must be an absolute path without traversal components.",
         )
 
     book = await _get_or_404(session, book_id)

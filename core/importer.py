@@ -191,6 +191,9 @@ def import_download(
         }
 
     work_dirs: list[Path] = []
+    # Track the _bookscout_work parent dirs created during extraction so
+    # cleanup can remove the right directories (not the archive stem subdirs).
+    extraction_roots: set[Path] = set()
     extracted = False
     errors: list[str] = []
 
@@ -199,8 +202,10 @@ def import_download(
 
     if source.is_file():
         if source.suffix.lower() in ARCHIVE_EXTENSIONS:
-            extract_dir = _extract_archive(source, source.parent / "_bookscout_work")
+            work_root = source.parent / "_bookscout_work"
+            extract_dir = _extract_archive(source, work_root)
             work_dirs.append(extract_dir)
+            extraction_roots.add(work_root)
             extracted = True
         elif source.suffix.lower() in AUDIO_EXTENSIONS:
             # Single audio file — copy it directly; do NOT scan the parent
@@ -214,8 +219,10 @@ def import_download(
     # ── Step 2: check for nested archives inside directories ─────────────────
     for wd in list(work_dirs):
         for archive in _collect_archives(wd):
-            extract_dir = _extract_archive(archive, archive.parent / "_bookscout_work")
+            work_root = archive.parent / "_bookscout_work"
+            extract_dir = _extract_archive(archive, work_root)
             work_dirs.append(extract_dir)
+            extraction_roots.add(work_root)
             extracted = True
 
     # ── Step 3: collect all audio files from directories ────────────────────
@@ -269,9 +276,8 @@ def import_download(
             errors.append(err)
             logger.error("import: copy failed", extra={"file": af.name, "error": str(exc)})
 
-    # ── Step 6: clean up empty work dirs ────────────────────────────────────
-    for wd in work_dirs:
-        work_root = wd.parent if wd.name == "_bookscout_work" else wd / "_bookscout_work"
+    # ── Step 6: clean up extraction temp dirs ───────────────────────────────
+    for work_root in extraction_roots:
         if work_root.exists():
             try:
                 shutil.rmtree(work_root, ignore_errors=True)

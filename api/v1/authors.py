@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.metadata import normalize_language_code
 from core.normalize import normalize_author_key, sort_name
-from db.models import Author, AuthorAlias, Book, BookAuthor, Watchlist
+from db.models import AppSetting, Author, AuthorAlias, Book, BookAuthor, Watchlist
 from db.session import get_session
 
 router = APIRouter(prefix="/authors", tags=["authors"])
@@ -35,6 +35,16 @@ class AuthorUpdate(BaseModel):
 
 class WatchlistSettings(BaseModel):
     scan_enabled: bool | None = None
+
+
+class AuthorPreferences(BaseModel):
+    notes: str = ""
+    ignore_rules: list[str] = []
+
+
+class AuthorPreferencesUpdate(BaseModel):
+    notes: str | None = None
+    ignore_rules: list[str] | None = None
 
 
 class CoAuthorOut(BaseModel):
@@ -81,6 +91,9 @@ class AuthorDetailOut(AuthorOut):
 class LanguageCount(BaseModel):
     language: str | None  # None means the book record pre-dates the language column
     count: int
+
+
+AUTHOR_PREFERENCES_KEY = "author_preferences"
 
 
 # ---------------------------------------------------------------------------
@@ -381,8 +394,7 @@ async def create_author(
     body: AuthorCreate,
     session: AsyncSession = Depends(get_session),
 ) -> Author:
-    # Duplicate check (case-sensitive — normalise if needed)
-    existing = await session.execute(select(Author).where(Author.name == body.name))
+    existing = await session.execute(select(Author).where(Author.name.ilike(body.name)))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Author already exists")
 
@@ -433,6 +445,49 @@ async def get_author(
         owned_count=owned_count,
         created_at=author.created_at,
     )
+
+
+@router.get(
+    "/{author_id}/preferences",
+    response_model=AuthorPreferences,
+    summary="Get author notes and ignore rules",
+)
+async def get_author_preferences(
+    author_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> AuthorPreferences:
+    await _get_or_404(session, author_id)
+    prefs = await _load_author_preferences(session)
+    return _coerce_author_preferences(prefs.get(str(author_id), {}))
+
+
+@router.patch(
+    "/{author_id}/preferences",
+    response_model=AuthorPreferences,
+    summary="Update author notes and ignore rules",
+)
+async def update_author_preferences(
+    author_id: int,
+    body: AuthorPreferencesUpdate,
+    session: AsyncSession = Depends(get_session),
+) -> AuthorPreferences:
+    await _get_or_404(session, author_id)
+    prefs = await _load_author_preferences(session)
+    current = _coerce_author_preferences(prefs.get(str(author_id), {}))
+
+    if body.notes is not None:
+        current.notes = body.notes
+    if body.ignore_rules is not None:
+        current.ignore_rules = _clean_ignore_rules(body.ignore_rules)
+
+    prefs[str(author_id)] = current.model_dump()
+    setting = await session.get(AppSetting, AUTHOR_PREFERENCES_KEY)
+    if setting is None:
+        session.add(AppSetting(key=AUTHOR_PREFERENCES_KEY, value=prefs))
+    else:
+        setting.value = prefs
+    await session.commit()
+    return current
 
 
 @router.patch("/{author_id}", response_model=AuthorOut, summary="Update author")
@@ -508,6 +563,34 @@ async def _get_or_404(session: AsyncSession, author_id: int) -> Author:
     return author
 
 
+async def _load_author_preferences(session: AsyncSession) -> dict[str, object]:
+    setting = await session.get(AppSetting, AUTHOR_PREFERENCES_KEY)
+    return dict(setting.value) if setting and isinstance(setting.value, dict) else {}
+
+
+def _clean_ignore_rules(rules: list[str]) -> list[str]:
+    seen: set[str] = set()
+    cleaned: list[str] = []
+    for rule in rules:
+        value = rule.strip()
+        if not value or value.lower() in seen:
+            continue
+        seen.add(value.lower())
+        cleaned.append(value)
+    return cleaned
+
+
+def _coerce_author_preferences(raw: object) -> AuthorPreferences:
+    if not isinstance(raw, dict):
+        return AuthorPreferences()
+    notes = raw.get("notes")
+    ignore_rules = raw.get("ignore_rules")
+    return AuthorPreferences(
+        notes=notes if isinstance(notes, str) else "",
+        ignore_rules=_clean_ignore_rules(ignore_rules if isinstance(ignore_rules, list) else []),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Alias routes
 # ---------------------------------------------------------------------------
@@ -579,6 +662,5 @@ async def delete_alias(
         raise HTTPException(status_code=404, detail="Alias not found")
     await session.delete(alias)
     await session.commit()
-
 
 

@@ -101,20 +101,26 @@ POST /api/v1/scans/{author_id}
 ```sql
 -- Watched authors
 authors (
-    id, name, name_sort, asin, openlibrary_key,
+    id, name, name_sort, name_normalized, asin, openlibrary_key,
     image_url, bio, active, created_at, updated_at
+)
+
+-- Known name aliases for authors (e.g. "J.N. Chaney" → "JN Chaney")
+author_aliases (
+    id, author_id, alias, source, created_at
 )
 
 -- Watchlist entries (one per watched author)
 watchlist (
-    id, author_id, scan_enabled, last_scanned, created_at
+    id, author_id, scan_enabled, last_scanned, favorite, created_at
 )
 
 -- Books discovered from all sources
 books (
     id, title, title_sort, subtitle, isbn, isbn13, asin,
     release_date, published_year, format, source,
-    cover_url, description, series_name, series_position,
+    cover_url, description, narrator, language,
+    series_name, series_position,
     have_it, score, confidence_band, score_reasons,
     match_method, deleted, created_at, updated_at
 )
@@ -123,6 +129,35 @@ books (
 book_authors (
     book_id, author_id,
     role  -- "author" | "co-author"
+)
+
+-- Webhook endpoints registered by the user
+webhooks (
+    id, url, description, events, active,
+    failure_count, disabled_at, created_at
+)
+
+-- Delivery log for each webhook event
+webhook_deliveries (
+    id, webhook_id, event_type, payload,
+    status_code, success, delivered_at
+)
+
+-- Filesystem paths to scan for owned audiobooks
+library_paths (
+    id, path, name, scan_enabled, last_scanned, created_at
+)
+
+-- User-configurable settings (JSON blobs keyed by name)
+app_settings (
+    key, value, updated_at
+)
+
+-- Record of every send-to-download-client action
+download_attempts (
+    id, book_id, book_title, query, release_title,
+    indexer, source, type, size_bytes, seeders,
+    download_url, status, error_detail, created_at
 )
 ```
 
@@ -148,6 +183,7 @@ book_authors (
 |-------|---------|
 | `scan.complete` | `author_id`, `author_name`, `new_books`, `updated_books`, `discovered[]` |
 | `coauthor.discovered` | `author_id`, `author_name`, `coauthors[]`, `auto_added` |
+| `import.complete` | `book_id`, `book_title`, `author_name`, `destination`, `files_copied[]` |
 
 Events are consumed by webhook subscribers
 (`POST /api/v1/webhooks/`) and the `/api/v1/events` SSE stream.

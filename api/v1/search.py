@@ -3,13 +3,17 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from db.session import get_session
 
 import httpx
 
 from config import get_config
 from core.search import (
+    humanize_size,
     send_to_sabnzbd,
     send_to_torrent_client,
     unified_search,
@@ -61,21 +65,17 @@ async def search(body: SearchRequest) -> list[dict]:
             jackett_key=getattr(jackett, "api_key", "") if jackett else "",
         )
 
-    # Annotate human-readable file size
     for r in results:
-        size = r.get("size", 0) or 0
-        if size >= 1_073_741_824:
-            r["size_human"] = f"{size / 1_073_741_824:.2f} GB"
-        elif size >= 1_048_576:
-            r["size_human"] = f"{size / 1_048_576:.2f} MB"
-        else:
-            r["size_human"] = f"{size / 1024:.1f} KB"
+        r["size_human"] = humanize_size(r.get("size", 0))
 
     return results
 
 
 @router.post("/download", summary="Send a result to the configured download client")
-async def download(body: DownloadRequest) -> dict:
+async def download(
+    body: DownloadRequest,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
     config = get_config()
     dl = getattr(config, "download", None)
     preferred = getattr(dl, "preferred", "") if dl else ""
@@ -107,7 +107,21 @@ async def download(body: DownloadRequest) -> dict:
                 book_id=body.book_id,
             )
 
-    if not result.get("success"):
+    success = result.get("success", False)
+    from db.models import DownloadAttempt
+    from db.session import get_session as _gs  # already imported via Depends above
+    attempt = DownloadAttempt(
+        book_id=body.book_id or None,
+        release_title=body.title,
+        type=body.type,
+        download_url=body.url,
+        status="queued" if success else "failed",
+        error_detail=result.get("detail") if not success else None,
+    )
+    session.add(attempt)
+    await session.commit()
+
+    if not success:
         raise HTTPException(status_code=502, detail=result.get("detail", "Download client returned an error"))
     return result
 

@@ -40,7 +40,7 @@ async def _generate(request: Request) -> AsyncGenerator[str, None]:
     pubsub = redis.pubsub()
     await pubsub.subscribe("bookscout:events")
 
-    last_heartbeat = asyncio.get_event_loop().time()
+    last_heartbeat = asyncio.get_running_loop().time()
     connected_at = last_heartbeat
     max_duration = 30 * 60  # 30 minutes
 
@@ -51,7 +51,7 @@ async def _generate(request: Request) -> AsyncGenerator[str, None]:
                 break
 
             # Maximum connection duration guard
-            now = asyncio.get_event_loop().time()
+            now = asyncio.get_running_loop().time()
             if now - connected_at >= max_duration:
                 yield "data: {\"event\": \"connection.timeout\"}\n\n"
                 break
