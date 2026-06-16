@@ -363,12 +363,18 @@ async def query_audnexus(
         # Seed language from the catalog 'media' response_group so the
         # post-enrichment filter has a value even if Audnexus lookup fails.
         catalog_lang = normalize_language_code(product.get("language"))
+        catalog_release_date = (
+            product.get("release_date")
+            or product.get("issue_date")
+            or str(product.get("publication_datetime") or "")[:10]
+            or None
+        )
 
         book: dict[str, Any] = {
             "title": title,
             "subtitle": product.get("subtitle", ""),
             "asin": asin,
-            "release_date": None,
+            "release_date": catalog_release_date,
             "cover_url": None,
             "format": "audiobook",
             "language": catalog_lang,  # overwritten by Audnexus detail if available
@@ -379,7 +385,7 @@ async def query_audnexus(
             "series_position": primary.get("sequence") if primary else None,
         }
 
-        # Best-effort enrichment: cover, ISBN, release date, language, canonical series
+        # Best-effort enrichment: cover, ISBN, fallback release date, language, canonical series
         async with sem:
             try:
                 dr = await client.get(
@@ -388,7 +394,7 @@ async def query_audnexus(
                 if dr.status_code == 200:
                     detail = dr.json()
                     book["cover_url"] = detail.get("image")
-                    book["release_date"] = detail.get("releaseDate")
+                    book["release_date"] = catalog_release_date or detail.get("releaseDate")
                     book["isbn"] = detail.get("isbn")
                     book["description"] = (
                         detail.get("summary") or detail.get("description", "")

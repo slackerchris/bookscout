@@ -6,6 +6,18 @@ from typing import Any
 from core.normalize import extract_series_from_title, normalize_title_key
 
 
+def _source_names(book: dict[str, Any]) -> set[str]:
+    source = book.get("source", [])
+    if isinstance(source, str):
+        source = [source]
+    return {str(s).lower() for s in source if s}
+
+
+def _prefers_release_date(book: dict[str, Any]) -> bool:
+    sources = _source_names(book)
+    return "audnexus" in sources or "audible" in sources
+
+
 def _merge_into(existing: dict[str, Any], book: dict[str, Any]) -> None:
     """Merge *book* fields into *existing* (coalesce missing fields, accumulate sources/authors)."""
     for field in (
@@ -14,6 +26,11 @@ def _merge_into(existing: dict[str, Any], book: dict[str, Any]) -> None:
     ):
         if not existing.get(field) and book.get(field):
             existing[field] = book[field]
+
+    if book.get("release_date") and (
+        not existing.get("release_date") or _prefers_release_date(book)
+    ):
+        existing["release_date"] = book["release_date"]
 
     new_src = book.get("source", [])
     if isinstance(new_src, str):

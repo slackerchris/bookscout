@@ -123,6 +123,32 @@ class TestMergeBooks:
         assert books[0]["cover_url"] == "http://img.jpg"
         assert books[0]["description"] == "A desc"
 
+    def test_coalesce_missing_release_date(self):
+        books = merge_books([
+            [self._book(title="Book A", isbn13="9780000000001", release_date=None)],
+            [self._book(title="Book A", isbn13="9780000000001", release_date="2026-06-16")],
+        ])
+        assert len(books) == 1
+        assert books[0]["release_date"] == "2026-06-16"
+
+    def test_audible_release_date_preferred(self):
+        books = merge_books([
+            [self._book(
+                title="Book A",
+                isbn13="9780000000001",
+                release_date="2026",
+                source="GoogleBooks",
+            )],
+            [self._book(
+                title="Book A",
+                isbn13="9780000000001",
+                release_date="2026-06-16",
+                source="Audnexus",
+            )],
+        ])
+        assert len(books) == 1
+        assert books[0]["release_date"] == "2026-06-16"
+
     def test_pass2_cross_identifier_title_dedup(self):
         """Different ISBNs but same normalized title → merged in pass 2."""
         books = merge_books([
