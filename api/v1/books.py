@@ -53,6 +53,8 @@ class BookOut(BaseModel):
     have_it: bool
     deleted: bool
     match_method: str
+    primary_author_id: int | None = None
+    canonical_book_id: int | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -63,6 +65,20 @@ class BookOut(BaseModel):
 class BookWithAuthorOut(BookOut):
     author_id: int
     author_name: str
+
+
+class CoAuthorEntry(BaseModel):
+    """Minimal author record used inside BookWithAllAuthorsOut."""
+    id: int
+    name: str
+    author_order: int | None = None
+
+
+class BookWithAllAuthorsOut(BookOut):
+    """Extended response for endpoints that need all credited authors, not just primary."""
+    primary_author_id: int
+    primary_author_name: str
+    all_authors: list[CoAuthorEntry]
 
 
 class BookUpdate(BaseModel):
@@ -78,6 +94,8 @@ class BookUpdate(BaseModel):
     isbn13: str | None = None
     narrator: str | None = None
     release_date: str | None = None
+    primary_author_id: int | None = None
+    canonical_book_id: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -129,12 +147,15 @@ async def recently_discovered(
     missing_only: bool = Query(False),
     session: AsyncSession = Depends(get_session),
 ) -> list[BookWithAuthorOut]:
-    """Return recently created catalog rows, newest first."""
+    """Return recently created catalog rows, newest first.
+
+    Joins via primary_author_id so each book appears exactly once regardless of
+    how many watched co-authors it has.  Canonical duplicates are excluded.
+    """
     q = (
         select(Book, Author.id, Author.name)
-        .join(BookAuthor, and_(BookAuthor.book_id == Book.id, BookAuthor.role == "author"))
-        .join(Author, Author.id == BookAuthor.author_id)
-        .where(Book.deleted.is_(False))
+        .join(Author, Author.id == Book.primary_author_id)
+        .where(Book.deleted.is_(False), Book.canonical_book_id.is_(None))
         .order_by(Book.created_at.desc())
         .limit(limit)
     )
@@ -151,14 +172,19 @@ async def upcoming_books(
     confidence_band: str | None = Query(None, description="high | medium | low"),
     session: AsyncSession = Depends(get_session),
 ) -> list[BookWithAuthorOut]:
-    """Return books with release dates today or later, ordered by release date."""
+    """Return books with release dates today or later, ordered by release date.
+
+    Joins via primary_author_id so co-authored books appear once under their
+    primary author only.  Canonical duplicates (canonical_book_id IS NOT NULL)
+    are excluded.
+    """
     today = datetime.utcnow().date().isoformat()
     q = (
         select(Book, Author.id, Author.name)
-        .join(BookAuthor, and_(BookAuthor.book_id == Book.id, BookAuthor.role == "author"))
-        .join(Author, Author.id == BookAuthor.author_id)
+        .join(Author, Author.id == Book.primary_author_id)
         .where(
             Book.deleted.is_(False),
+            Book.canonical_book_id.is_(None),
             _upcoming_release_condition(today),
         )
         .order_by(Book.release_date.asc(), Book.title_sort.asc())
@@ -177,7 +203,13 @@ async def book_summary(session: AsyncSession = Depends(get_session)) -> dict:
     today = datetime.utcnow().date().isoformat()
 
     async def count_where(*conditions) -> int:
-        result = await session.execute(select(func.count(Book.id)).where(Book.deleted.is_(False), *conditions))
+        result = await session.execute(
+            select(func.count(Book.id)).where(
+                Book.deleted.is_(False),
+                Book.canonical_book_id.is_(None),
+                *conditions,
+            )
+        )
         return int(result.scalar_one())
 
     total = await count_where()
@@ -348,9 +380,7 @@ async def search_for_book(
 
     author_result = await session.execute(
         select(Author.name)
-        .join(BookAuthor, Author.id == BookAuthor.author_id)
-        .where(BookAuthor.book_id == book_id, BookAuthor.role == "author")
-        .limit(1)
+        .where(Author.id == book.primary_author_id)
     )
     author_name = author_result.scalar_one_or_none() or ""
 
@@ -468,9 +498,8 @@ async def find_duplicates(
     """Return groups of 2+ books that share the same normalised title + primary author."""
     q = (
         select(Book, Author.id, Author.name)
-        .join(BookAuthor, and_(BookAuthor.book_id == Book.id, BookAuthor.role == "author"))
-        .join(Author, Author.id == BookAuthor.author_id)
-        .where(Book.deleted.is_(False))
+        .join(Author, Author.id == Book.primary_author_id)
+        .where(Book.deleted.is_(False), Book.canonical_book_id.is_(None))
         .order_by(Author.name_sort, Book.title_sort)
     )
     result = await session.execute(q)
@@ -490,6 +519,77 @@ async def find_duplicates(
         for (aid, _), books in sorted(groups.items(), key=lambda x: x[1][0]["author_name"])
         if len(books) >= 2
     ]
+
+
+@router.get("/co-author-conflicts", summary="Books with multiple watched co-authors as primary authors")
+async def co_author_conflicts(
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    """Return books where 2+ watched (watchlisted) authors all have role='author'.
+
+    These are co-authored books where BookScout is tracking multiple credited
+    authors.  The management UI uses this to let the user designate which author
+    is truly primary so the book appears only once in list views.
+
+    Each group contains the book's data, the current primary author, and the full
+    list of co-primary authors with their billing order (author_order) if known.
+    """
+    from db.models import Watchlist
+
+    # Find all books where 2+ watched authors have role='author'
+    watched_author_subq = select(Watchlist.author_id).scalar_subquery()
+
+    q = (
+        select(
+            Book.id,
+            BookAuthor.author_id,
+            Author.name,
+            Author.name_sort,
+            BookAuthor.author_order,
+        )
+        .join(BookAuthor, and_(BookAuthor.book_id == Book.id, BookAuthor.role == "author"))
+        .join(Author, Author.id == BookAuthor.author_id)
+        .where(
+            Book.deleted.is_(False),
+            Book.canonical_book_id.is_(None),
+            BookAuthor.author_id.in_(watched_author_subq),
+        )
+        .order_by(Book.id, BookAuthor.author_order.asc().nullslast(), Author.name_sort)
+    )
+    rows = (await session.execute(q)).all()
+
+    # Group by book_id; keep only books with 2+ watched authors
+    book_author_map: dict[int, list[dict]] = {}
+    for book_id, author_id, author_name, _, author_order in rows:
+        book_author_map.setdefault(book_id, []).append({
+            "author_id": author_id,
+            "author_name": author_name,
+            "author_order": author_order,
+        })
+    conflict_book_ids = [bid for bid, authors in book_author_map.items() if len(authors) >= 2]
+
+    if not conflict_book_ids:
+        return []
+
+    # Fetch full book data for conflicting books
+    books_q = (
+        select(Book, Author.id, Author.name)
+        .join(Author, Author.id == Book.primary_author_id)
+        .where(Book.id.in_(conflict_book_ids))
+        .order_by(Author.name_sort, Book.title_sort)
+    )
+    books_result = (await session.execute(books_q)).all()
+
+    out = []
+    for book, primary_author_id, primary_author_name in books_result:
+        bd = BookOut.model_validate(_normalise_book_language(book)).model_dump(mode="json")
+        out.append({
+            **bd,
+            "primary_author_id": primary_author_id,
+            "primary_author_name": primary_author_name,
+            "all_authors": book_author_map[book.id],
+        })
+    return out
 
 
 # ---------------------------------------------------------------------------

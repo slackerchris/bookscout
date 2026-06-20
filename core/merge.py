@@ -39,10 +39,15 @@ def _merge_into(existing: dict[str, Any], book: dict[str, Any]) -> None:
         if s and s not in existing["source"]:
             existing["source"].append(s)
 
-    existing_authors: set[str] = set(existing.get("authors") or [])
+    # Preserve first-seen order (Audible billing position) rather than using a
+    # set, which would destroy ordering and make primary-author detection unreliable.
+    existing_authors: list[str] = existing.get("authors") or []
+    seen_authors: set[str] = set(existing_authors)
     for a in book.get("authors") or []:
-        existing_authors.add(a)
-    existing["authors"] = list(existing_authors)
+        if a and a not in seen_authors:
+            existing_authors.append(a)
+            seen_authors.add(a)
+    existing["authors"] = existing_authors
 
     # Merge narrator lists (deduplicated, preserving order from each source)
     existing_narrators: list[str] = existing.get("narrators") or []

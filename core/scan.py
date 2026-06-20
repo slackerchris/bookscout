@@ -527,18 +527,33 @@ def _prepare_book_fields(book: dict[str, Any], primary_author_name: str) -> dict
     # co-author list.  Some APIs (Audnexus) put narrators in the authors array
     # without a role suffix.
     narrator_keys = frozenset(normalize_author_key(n) for n in (book.get("narrators") or []) if n)
+    authors_list = book.get("authors") or []
     co_authors = [
-        a for a in (book.get("authors") or [])
+        a for a in authors_list
         if not author_names_match(primary_author_name, a)
         and not _is_contributor_only(a)
         and normalize_author_key(a) not in narrator_keys
     ]
+    # Capture each author's position in the source authors array so we can store
+    # author_order on BookAuthor rows and surface billing-order information in the UI.
+    scanning_author_order: int = next(
+        (i for i, a in enumerate(authors_list) if author_names_match(primary_author_name, a)),
+        0,
+    )
+    co_author_orders: dict[str, int] = {
+        a: i for i, a in enumerate(authors_list)
+        if not author_names_match(primary_author_name, a)
+        and not _is_contributor_only(a)
+        and normalize_author_key(a) not in narrator_keys
+    }
     return {
         "source_str": source_str,
         "score_reasons_str": score_reasons_str,
         "have_it_bool": have_it_bool,
         "narrator_str": narrator_str,
         "co_authors": co_authors,
+        "co_author_orders": co_author_orders,
+        "scanning_author_order": scanning_author_order,
         "published_year": _parse_year(book.get("release_date")),
         "prefers_release_date": _prefers_release_date(book),
     }
@@ -587,12 +602,18 @@ async def _insert_new_book(
         confidence_band=book.get("confidence_band", "low"),
         score_reasons=fields["score_reasons_str"],
         match_method="audiobookshelf" if have_it_bool else "api",
+        primary_author_id=author_id,  # first discoverer is primary; overridable via UI
     )
     session.add(new_book)
     await session.flush()  # populate new_book.id
 
-    # Primary author link
-    session.add(BookAuthor(book_id=new_book.id, author_id=author_id, role="author"))
+    # Primary author link — store billing position from source API
+    session.add(BookAuthor(
+        book_id=new_book.id,
+        author_id=author_id,
+        role="author",
+        author_order=fields["scanning_author_order"],
+    ))
 
     # Co-author links — cache already contains the right Author objects (or None)
     # based on whether auto_add_coauthors was enabled at resolution time.
@@ -601,7 +622,12 @@ async def _insert_new_book(
         co_author = co_author_cache.get(co_name)
         if co_author and co_author.id not in seen_co_ids:
             seen_co_ids.add(co_author.id)
-            session.add(BookAuthor(book_id=new_book.id, author_id=co_author.id, role="co-author"))
+            session.add(BookAuthor(
+                book_id=new_book.id,
+                author_id=co_author.id,
+                role="co-author",
+                author_order=fields["co_author_orders"].get(co_name),
+            ))
 
     in_discovered = bool(book.get("confidence_band") in ("high", "medium") or have_it_bool)
     return new_book, in_discovered
@@ -617,9 +643,16 @@ async def _update_existing_book(
     co_author_cache: dict[str, Author | None],
 ) -> None:
     """Update an existing Book row and reconcile its co-author links."""
-    # Cross-author hit: promote scanning author to primary author
+    # Cross-author hit: add scanning author as a second 'author' role contributor.
+    # primary_author_id is intentionally left unchanged — the first discoverer stays
+    # primary by default.  Users correct mis-assignments via the management UI.
     if is_cross_author:
-        session.add(BookAuthor(book_id=existing.id, author_id=author_id, role="author"))
+        session.add(BookAuthor(
+            book_id=existing.id,
+            author_id=author_id,
+            role="author",
+            author_order=fields["scanning_author_order"],
+        ))
         await session.execute(
             delete(BookAuthor).where(
                 and_(
@@ -693,7 +726,12 @@ async def _update_existing_book(
         co_author = co_author_cache.get(co_name)
         if co_author:
             if co_author.id not in existing_co_ids and co_author.id not in fresh_co_ids:
-                session.add(BookAuthor(book_id=existing.id, author_id=co_author.id, role="co-author"))
+                session.add(BookAuthor(
+                    book_id=existing.id,
+                    author_id=co_author.id,
+                    role="co-author",
+                    author_order=fields["co_author_orders"].get(co_name),
+                ))
             fresh_co_ids.add(co_author.id)
     for stale_id in existing_co_ids - fresh_co_ids:
         await session.execute(

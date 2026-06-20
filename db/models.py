@@ -109,6 +109,16 @@ class Book(Base):
     created_at  = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at  = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
+    # Primary author tracking (v0.69.0+)
+    # The single author this book "belongs to" in list/release views.
+    # NULL-safe: code falls back to the first role='author' BookAuthor row when NULL.
+    primary_author_id = Column(Integer, ForeignKey("authors.id", ondelete="SET NULL"), nullable=True)
+
+    # Canonical deduplication (v0.69.0+)
+    # When non-NULL, this row is a duplicate of the referenced book and is
+    # excluded from list queries.  Set via the management UI or merge endpoint.
+    canonical_book_id = Column(Integer, ForeignKey("books.id", ondelete="SET NULL"), nullable=True)
+
     book_authors = relationship("BookAuthor", back_populates="book", cascade="all, delete-orphan")
 
 
@@ -119,9 +129,10 @@ class BookAuthor(Base):
         UniqueConstraint("book_id", "author_id", "role", name="uq_book_author_role"),
     )
 
-    book_id   = Column(Integer, ForeignKey("books.id",   ondelete="CASCADE"), primary_key=True)
-    author_id = Column(Integer, ForeignKey("authors.id", ondelete="CASCADE"), primary_key=True)
-    role      = Column(Text, server_default="author", primary_key=True)  # 'author' | 'co-author' | 'narrator'
+    book_id      = Column(Integer, ForeignKey("books.id",   ondelete="CASCADE"), primary_key=True)
+    author_id    = Column(Integer, ForeignKey("authors.id", ondelete="CASCADE"), primary_key=True)
+    role         = Column(Text, server_default="author", primary_key=True)  # 'author' | 'co-author' | 'narrator'
+    author_order = Column(Integer, nullable=True)  # position in source authors array; 0 = first-billed
 
     book   = relationship("Book",   back_populates="book_authors")
     author = relationship("Author", back_populates="book_authors")
@@ -219,6 +230,8 @@ class DownloadAttempt(Base):
 Index("ix_books_isbn13",               Book.isbn13)
 Index("ix_books_confidence_band",      Book.confidence_band)
 Index("ix_books_have_it",              Book.have_it)
+Index("ix_books_primary_author_id",    Book.primary_author_id)
+Index("ix_books_canonical_book_id",    Book.canonical_book_id)
 Index("ix_authors_name_sort",          Author.name_sort)
 Index("ix_book_authors_author_id",     BookAuthor.author_id)
 Index("ix_webhook_deliveries_webhook", WebhookDelivery.webhook_id)
