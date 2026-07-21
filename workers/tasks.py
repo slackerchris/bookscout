@@ -5,6 +5,7 @@ context dict), remaining args are the task payload.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from config import get_config
@@ -12,15 +13,33 @@ from db.session import AsyncSessionFactory
 from core.scan import scan_author_by_id
 from core.scanner import scan_library_path as _scan_library_path
 
+logger = logging.getLogger(__name__)
+
 
 async def scan_author_task(ctx: dict, author_id: int) -> dict[str, Any]:
     """arq task: run the full scan pipeline for a single watchlisted author."""
+    from core.auto_download import run_auto_download_for_author
+
     config = get_config()
     redis_client = ctx.get("redis")
     async with AsyncSessionFactory() as session:
-        return await scan_author_by_id(
+        result = await scan_author_by_id(
             session, author_id, config=config, redis_client=redis_client
         )
+
+    # After the scan lands, grab/queue any newly eligible books for authors
+    # with auto_download enabled (cheap no-op otherwise).
+    try:
+        async with AsyncSessionFactory() as session:
+            auto = await run_auto_download_for_author(
+                session, author_id, config, redis_client=redis_client
+            )
+        if auto.get("enabled"):
+            result["auto_download"] = auto
+    except Exception:
+        logger.exception("Auto-download pass failed", extra={"author_id": author_id})
+
+    return result
 
 
 async def scan_all_authors_task(ctx: dict) -> dict[str, Any]:
@@ -46,11 +65,20 @@ async def scan_all_authors_task(ctx: dict) -> dict[str, Any]:
     enqueued = 0
     if redis_client is not None:
         from arq.connections import create_pool
+        from core.enqueue import author_scan_job_id, enqueue_unique
         from workers.settings import _redis_settings
         arq_redis = await create_pool(_redis_settings())
-        for aid in author_ids:
-            await arq_redis.enqueue_job("scan_author_task", aid)
-            enqueued += 1
+        try:
+            for aid in author_ids:
+                job = await enqueue_unique(
+                    arq_redis, "scan_author_task", aid, job_id=author_scan_job_id(aid)
+                )
+                if job:
+                    enqueued += 1
+        finally:
+            # Without this the pool leaks once per cron run for the life of
+            # the worker process.
+            await arq_redis.aclose()
     else:
         # Fallback: run inline if no redis context (e.g. CLI usage)
         config = get_config()
@@ -92,6 +120,84 @@ async def scan_all_library_paths_task(ctx: dict) -> dict[str, Any]:
             errors.append({"library_path_id": pid, "error": str(exc)})
 
     return {"paths_scanned": len(results), "results": results, "errors": errors}
+
+
+async def poll_completed_downloads_task(ctx: dict) -> dict[str, Any]:
+    """arq cron task: import completed qBittorrent downloads automatically.
+
+    Native replacement for the external n8n poller workflow.  Finds completed
+    torrents tagged ``bookscout-<book_id>`` (stamped when BookScout sent
+    them), runs the normal import pipeline for each, and tags the torrent
+    ``bs-imported`` / ``bs-failed`` so it is processed exactly once.
+    """
+    import httpx
+    from core.qbittorrent import (
+        TAG_FAILED,
+        TAG_IMPORTED,
+        fetch_completed_torrents,
+        login,
+        select_import_candidates,
+        set_tags,
+    )
+
+    config = get_config()
+    pp = getattr(config, "postprocess", None)
+    mode = getattr(pp, "mode", "client") if pp else "client"
+    library_root = getattr(pp, "library_root", "") if pp else ""
+    auto_import = getattr(pp, "auto_import", True) if pp else True
+    if mode != "bookscout" or not library_root or not auto_import:
+        return {"skipped": "auto-import disabled (postprocess.mode/library_root/auto_import)"}
+
+    dl = getattr(config, "download", None)
+    torrent = getattr(dl, "torrent", None) if dl else None
+    qbt_url = getattr(torrent, "url", "") if torrent else ""
+    qbt_type = getattr(torrent, "type", "qbittorrent") if torrent else "qbittorrent"
+    if not qbt_url or qbt_type != "qbittorrent":
+        return {"skipped": "no qBittorrent client configured"}
+
+    username = getattr(torrent, "username", "")
+    password = getattr(torrent, "password", "")
+    category = getattr(torrent, "default_category", "")
+
+    imported: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+
+    async with httpx.AsyncClient() as client:
+        cookies = await login(client, qbt_url, username, password)
+        if cookies is None:
+            return {"error": "qBittorrent authentication failed"}
+
+        torrents = await fetch_completed_torrents(client, qbt_url, cookies, category)
+        candidates = select_import_candidates(torrents)
+
+        for cand in candidates:
+            result = await import_download_task(ctx, cand["book_id"], cand["content_path"])
+            # files skipped-as-already-present still means the book is in the
+            # library — mark imported so the torrent isn't retried forever.
+            ok = bool(result.get("success")) and bool(
+                result.get("files_copied") or result.get("skipped")
+            )
+            if ok:
+                await set_tags(
+                    client, qbt_url, cookies, cand["hash"],
+                    add=TAG_IMPORTED, remove=TAG_FAILED,
+                )
+                imported.append({"book_id": cand["book_id"], "name": cand["name"]})
+            else:
+                await set_tags(client, qbt_url, cookies, cand["hash"], add=TAG_FAILED)
+                failed.append({
+                    "book_id": cand["book_id"],
+                    "name": cand["name"],
+                    "detail": result.get("detail") or (result.get("errors") or [None])[0],
+                })
+
+    if imported or failed:
+        logger.info(
+            "Auto-import poll complete",
+            extra={"imported": len(imported), "failed": len(failed)},
+        )
+
+    return {"candidates": len(imported) + len(failed), "imported": imported, "failed": failed}
 
 
 async def import_download_task(

@@ -14,6 +14,7 @@ Supported directory structures
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -138,7 +139,10 @@ async def scan_library_path(
     )
     db_books: list[tuple[int, str, str]] = rows.all()  # (id, title, author_name)
 
-    entries = _parse_audio_entries(root)
+    # The recursive walk is synchronous I/O — run it in a thread so a large
+    # (or slow-NFS) library doesn't stall the worker's event loop.
+    loop = asyncio.get_running_loop()
+    entries = await loop.run_in_executor(None, _parse_audio_entries, root)
     matched = 0
     unmatched = 0
 

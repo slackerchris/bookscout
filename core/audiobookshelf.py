@@ -185,7 +185,11 @@ async def fetch_abs_books_for_author(
                     for abs_author in ar.json().get("authors", [])
                     if author_names_match(author_name, abs_author.get("name", ""))
                 ]
-                _abs_author_id_cache[cache_key] = abs_author_ids  # type: ignore[assignment]
+                # Only cache positive hits — an empty result may just mean the
+                # author hasn't been added to ABS yet, and caching it would hide
+                # them until the worker restarts.
+                if abs_author_ids:
+                    _abs_author_id_cache[cache_key] = abs_author_ids  # type: ignore[assignment]
 
             if not abs_author_ids:
                 continue
@@ -238,7 +242,7 @@ async def fetch_abs_books_for_author(
                     total_processed += len(items)
                     if total_processed >= data.get("total", 0):
                         break
-                page += 1
+                    page += 1
 
     except Exception as exc:
         logger.error(

@@ -66,8 +66,8 @@ def upgrade() -> None:
                         UPDATE book_authors
                         SET book_id = :canonical
                         WHERE book_id = :dup
-                          AND (book_id, author_id, role) NOT IN (
-                              SELECT book_id, author_id, role
+                          AND (author_id, role) NOT IN (
+                              SELECT author_id, role
                               FROM book_authors
                               WHERE book_id = :canonical
                           )

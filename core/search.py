@@ -589,3 +589,51 @@ async def check_n8n_status(
         return {"configured": True, "status": "error", "detail": f"HTTP {r.status_code}"}
     except Exception as exc:
         return {"configured": True, "status": "error", "detail": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Config-driven send (shared by the search API, auto-download, and approvals)
+# ---------------------------------------------------------------------------
+
+async def send_release(
+    client: httpx.AsyncClient,
+    config: Any,
+    *,
+    url: str,
+    title: str,
+    release_type: str = "torrent",   # "torrent" | "nzb"
+    category: str = "",
+    tag: str = "",
+    save_path: str = "",
+    book_id: int = 0,
+) -> dict[str, Any]:
+    """Send a release to the configured download client, resolving client
+    settings (URLs, credentials, default category/tag/save-path) from *config*.
+
+    Returns the client result dict: ``{"success": bool, ...}``.
+    """
+    dl = getattr(config, "download", None)
+    if release_type == "nzb":
+        sabnzbd = getattr(dl, "sabnzbd", None) if dl else None
+        return await send_to_sabnzbd(
+            client,
+            url,
+            title,
+            sabnzbd_url=getattr(sabnzbd, "url", "") if sabnzbd else "",
+            api_key=getattr(sabnzbd, "api_key", "") if sabnzbd else "",
+            category=category or (getattr(sabnzbd, "default_category", "") if sabnzbd else ""),
+        )
+    torrent = getattr(dl, "torrent", None) if dl else None
+    return await send_to_torrent_client(
+        client,
+        url,
+        title,
+        client_type=getattr(torrent, "type", "qbittorrent") if torrent else "qbittorrent",
+        client_url=getattr(torrent, "url", "") if torrent else "",
+        username=getattr(torrent, "username", "") if torrent else "",
+        password=getattr(torrent, "password", "") if torrent else "",
+        category=category or (getattr(torrent, "default_category", "") if torrent else ""),
+        tag=tag or (getattr(torrent, "default_tag", "") if torrent else ""),
+        save_path=save_path or (getattr(torrent, "save_path", "") if torrent else ""),
+        book_id=book_id,
+    )

@@ -5,9 +5,11 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+from urllib.parse import urlparse
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,8 +36,18 @@ class WebhookCreate(BaseModel):
     description: str | None = None
     events: list[str] = []  # empty = all events
 
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, v: str) -> str:
+        parsed = urlparse(v)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError("url must be an absolute http:// or https:// URL")
+        return v
+
 
 class WebhookOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     url: str
     description: str | None = None
@@ -45,19 +57,15 @@ class WebhookOut(BaseModel):
     disabled_at: datetime | None = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 class DeliveryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     event_type: str
     status_code: int | None = None
     success: bool | None = None
     delivered_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 # ---------------------------------------------------------------------------

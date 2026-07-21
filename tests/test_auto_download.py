@@ -1,0 +1,94 @@
+"""Tests for auto-download eligibility and best-result selection."""
+from __future__ import annotations
+
+from datetime import date
+
+from core.auto_download import book_is_eligible, parse_release_date, select_best_result
+from db.models import Book
+
+TODAY = date(2026, 7, 21)
+
+
+def _book(**overrides) -> Book:
+    base = dict(
+        title="Test",
+        title_sort="Test",
+        score=90,
+        confidence_band="high",
+        match_method="api",
+        have_it=False,
+        deleted=False,
+        canonical_book_id=None,
+        release_date="2026-01-01",
+    )
+    base.update(overrides)
+    return Book(**base)
+
+
+# ── release date parsing ────────────────────────────────────────────────────
+
+def test_parse_iso_and_year_dates():
+    assert parse_release_date("2026-07-21") == date(2026, 7, 21)
+    assert parse_release_date("2026") == date(2026, 1, 1)
+    assert parse_release_date("July 2026") is None
+    assert parse_release_date(None) is None
+    assert parse_release_date("2026-13-45") is None
+
+
+# ── eligibility ─────────────────────────────────────────────────────────────
+
+def test_eligible_book():
+    assert book_is_eligible(_book(), TODAY) is True
+
+
+def test_ineligible_variants():
+    assert book_is_eligible(_book(have_it=True), TODAY) is False
+    assert book_is_eligible(_book(deleted=True), TODAY) is False
+    assert book_is_eligible(_book(canonical_book_id=1), TODAY) is False
+    assert book_is_eligible(_book(confidence_band="medium"), TODAY) is False
+    assert book_is_eligible(_book(release_date="2027-01-01"), TODAY) is False  # unreleased
+    assert book_is_eligible(_book(release_date=None), TODAY) is False          # unknown date
+
+
+# ── result selection ────────────────────────────────────────────────────────
+
+def _result(**overrides) -> dict:
+    base = {
+        "title": "Test Book [M4B] Unabridged",
+        "type": "torrent",
+        "seeders": 10,
+        "size": 500 * 1024**2,
+        "download_url": "http://indexer/dl/1",
+        "indexer": "idx",
+        "source": "Prowlarr",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_min_seeders_filters_torrents_but_not_nzbs():
+    prefs = {"min_seeders": 5}
+    assert select_best_result([_result(seeders=2)], prefs) is None
+    nzb = _result(seeders=0, type="nzb")
+    assert select_best_result([nzb], prefs) == nzb
+
+
+def test_max_size_filter():
+    prefs = {"max_size_gb": 1}
+    too_big = _result(size=2 * 1024**3)
+    assert select_best_result([too_big], prefs) is None
+    assert select_best_result([_result()], prefs) is not None
+
+
+def test_preferred_format_is_soft():
+    prefs = {"preferred_format": "m4b"}
+    mp3 = _result(title="Test Book MP3")
+    m4b = _result(title="Test Book M4B")
+    # Prefers the matching format when available…
+    assert select_best_result([mp3, m4b], prefs) == m4b
+    # …but falls back rather than skipping the book entirely.
+    assert select_best_result([mp3], prefs) == mp3
+
+
+def test_requires_a_download_url():
+    assert select_best_result([_result(download_url="", url="")], {}) is None

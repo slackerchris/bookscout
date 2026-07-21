@@ -8,6 +8,7 @@ Interactive API docs are available at  /docs  (Swagger UI)
 """
 from __future__ import annotations
 
+import hmac
 import logging
 import pathlib
 from contextlib import asynccontextmanager
@@ -80,25 +81,19 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-_cors_origins: list[str] = getattr(
-    getattr(get_config(), "server", None), "cors_origins", None
-) or ["*"]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # ── Optional bearer-token authentication ─────────────────────────────────────
 # When server.secret_key is set to something other than the default placeholder,
 # all endpoints except /health and /docs|/redoc|/openapi.json require a valid
 # Authorization: Bearer <token> header.
 
 _DEFAULT_SECRET = "bookscout-secret-key-change-in-production"
-_PUBLIC_PREFIXES = ("/health", "/docs", "/redoc", "/openapi.json")
+_PUBLIC_PATHS = ("/health", "/docs", "/redoc", "/openapi.json")
+
+
+def _is_public_path(path: str) -> bool:
+    # Exact match or a true sub-path — plain startswith would also exempt
+    # e.g. /healthz-lookalike.
+    return any(path == p or path.startswith(p + "/") for p in _PUBLIC_PATHS)
 
 
 class BearerTokenMiddleware(BaseHTTPMiddleware):
@@ -108,16 +103,36 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
         # Skip auth when secret is unset or still the default placeholder
         if not secret or secret == _DEFAULT_SECRET:
             return await call_next(request)
-        # Always allow public endpoints
-        if any(request.url.path.startswith(p) for p in _PUBLIC_PREFIXES):
+        if _is_public_path(request.url.path):
             return await call_next(request)
         auth = request.headers.get("authorization", "")
-        if auth == f"Bearer {secret}":
+        if hmac.compare_digest(auth.encode(), f"Bearer {secret}".encode()):
             return await call_next(request)
         return JSONResponse(status_code=401, content={"detail": "Missing or invalid bearer token"})
 
 
 app.add_middleware(BearerTokenMiddleware)
+
+# CORS must be added AFTER the auth middleware so it wraps it (Starlette runs
+# the last-added middleware first).  With auth outermost, browser preflight
+# OPTIONS requests — which never carry an Authorization header — were rejected
+# with a CORS-header-less 401, blocking all cross-origin clients whenever a
+# real secret_key was configured.
+_cors_origins: list[str] = getattr(
+    getattr(get_config(), "server", None), "cors_origins", None
+) or ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    # Credentialed wildcard CORS makes Starlette echo any Origin, letting any
+    # website drive the API from a visitor's browser.  Bearer-token auth uses
+    # the Authorization header (not cookies), which works without credentials,
+    # so only enable credentialed CORS for an explicit origin allowlist.
+    allow_credentials=_cors_origins != ["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ── Mount routers ────────────────────────────────────────────────────────────
 from api.v1.authors import router as authors_router
@@ -131,6 +146,7 @@ from api.v1.abs import router as abs_router
 from api.v1.library_paths import router as library_paths_router
 from api.v1.n8n import router as n8n_router
 from api.v1.download_history import router as download_history_router
+from api.v1.series import router as series_router
 from api.v1.settings import router as settings_router
 
 PREFIX = "/api/v1"
@@ -146,4 +162,5 @@ app.include_router(abs_router, prefix=PREFIX)
 app.include_router(library_paths_router, prefix=PREFIX)
 app.include_router(n8n_router, prefix=PREFIX)
 app.include_router(download_history_router, prefix=PREFIX)
+app.include_router(series_router, prefix=PREFIX)
 app.include_router(settings_router, prefix=PREFIX)

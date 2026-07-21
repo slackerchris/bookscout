@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_config
 from core.audiobookshelf import get_all_authors_from_audiobookshelf, get_all_books_from_audiobookshelf
+from core.enqueue import author_scan_job_id, enqueue_unique
 from core.normalize import author_names_match, normalize_author_key, normalize_title_key, sort_name, sort_title
 from core.scan import _is_contributor_only
 from db.models import AppSetting, Author, Book, BookAuthor
@@ -195,6 +196,9 @@ async def sync_books(
                 existing_book.have_it = True
                 existing_book.match_method = "audiobookshelf"
                 changed = True
+            if existing_book.primary_author_id is None:
+                existing_book.primary_author_id = author_obj.id
+                changed = True
             for attr, val in (
                 ("series_name",     item.get("series_name")),
                 ("series_position", item.get("series_position")),
@@ -221,6 +225,10 @@ async def sync_books(
                 source='["audiobookshelf"]',
                 score=0,
                 confidence_band="medium",
+                # Without this, the book is invisible to every endpoint that
+                # inner-joins on primary_author_id (recently-discovered,
+                # upcoming, duplicates, co-author-conflicts).
+                primary_author_id=author_obj.id,
             )
             session.add(new_book)
             await session.flush()
@@ -234,8 +242,11 @@ async def sync_books(
     arq = getattr(request.app.state, "arq_pool", None)
     if arq:
         for author_id in affected_author_ids:
-            job = await arq.enqueue_job("scan_author_task", author_id)
-            job_ids.append(job.job_id)
+            job = await enqueue_unique(
+                arq, "scan_author_task", author_id, job_id=author_scan_job_id(author_id)
+            )
+            if job:
+                job_ids.append(job.job_id)
 
     return {
         "new_books": new_books,

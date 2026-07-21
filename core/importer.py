@@ -24,6 +24,7 @@ import logging
 import re
 import shutil
 import zipfile
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -229,12 +230,16 @@ def import_download(
     for wd in work_dirs:
         audio_files.extend(_collect_audio_files(wd))
 
-    # Deduplicate by name (in case the same stem appears in multiple dirs)
-    seen: set[str] = set()
+    # Deduplicate by resolved path only — the same file can be collected twice
+    # via overlapping work dirs, but same-NAMED files in different directories
+    # (CD1/Track01.mp3, CD2/Track01.mp3 …) are distinct parts of the book and
+    # must all be kept.
+    seen: set[Path] = set()
     unique_audio: list[Path] = []
     for af in audio_files:
-        if af.name not in seen:
-            seen.add(af.name)
+        resolved = af.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
             unique_audio.append(af)
 
     if not unique_audio:
@@ -255,21 +260,28 @@ def import_download(
     files_copied: list[str] = []
     skipped: list[str] = []
 
+    # The destination is flat, so same-named files from different source dirs
+    # (multi-disc layouts) are disambiguated with their parent directory name.
+    name_counts = Counter(af.name for af in unique_audio)
+
     for af in unique_audio:
-        target = dest / af.name
+        target_name = (
+            af.name if name_counts[af.name] == 1 else f"{af.parent.name} - {af.name}"
+        )
+        target = dest / target_name
         if target.exists():
-            skipped.append(af.name)
+            skipped.append(target_name)
             logger.info(
                 "import: file already exists at destination — skipping",
-                extra={"file": af.name, "dest": str(dest)},
+                extra={"file": target_name, "dest": str(dest)},
             )
             continue
         try:
             shutil.copy2(str(af), str(target))
-            files_copied.append(af.name)
+            files_copied.append(target_name)
             logger.info(
                 "import: copied file",
-                extra={"file": af.name, "dest": str(dest)},
+                extra={"file": target_name, "dest": str(dest)},
             )
         except Exception as exc:
             err = f"Failed to copy {af.name}: {exc}"

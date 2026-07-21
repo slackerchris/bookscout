@@ -11,10 +11,22 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-DATABASE_URL: str = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://bookscout:bookscout@localhost/bookscout",
-)
+def _database_url() -> str:
+    """Resolve the DB URL: DATABASE_URL env var → config.yaml database.url → default."""
+    if env_url := os.getenv("DATABASE_URL"):
+        return env_url
+    try:
+        from config import get_config
+
+        cfg_url = getattr(getattr(get_config(), "database", None), "url", None)
+        if cfg_url:
+            return cfg_url
+    except Exception:
+        pass
+    return "postgresql+asyncpg://bookscout:bookscout@localhost/bookscout"
+
+
+DATABASE_URL: str = _database_url()
 
 engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
 

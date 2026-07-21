@@ -10,6 +10,7 @@ from sqlalchemy import (
     BigInteger, Boolean, Column, ForeignKey, Index,
     Integer, JSON, String, Text, TIMESTAMP, UniqueConstraint, func,
 )
+from sqlalchemy.sql import expression
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -34,7 +35,7 @@ class Author(Base):
     openlibrary_key  = Column(Text, unique=True)
     image_url        = Column(Text)
     bio              = Column(Text)
-    active           = Column(Boolean, server_default="true", nullable=False)
+    active           = Column(Boolean, server_default=expression.true(), nullable=False)
     created_at       = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at       = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -102,9 +103,9 @@ class Book(Base):
 
     # Match tracking (v0.31.0+)
     match_method    = Column(Text, server_default="api", nullable=False)  # 'api' | 'filesystem' | 'manual' | 'audiobookshelf'
-    match_reviewed  = Column(Boolean, server_default="false", nullable=False)
-    have_it         = Column(Boolean, server_default="false", nullable=False)
-    deleted         = Column(Boolean, server_default="false", nullable=False)
+    match_reviewed  = Column(Boolean, server_default=expression.false(), nullable=False)
+    have_it         = Column(Boolean, server_default=expression.false(), nullable=False)
+    deleted         = Column(Boolean, server_default=expression.false(), nullable=False)
 
     created_at  = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at  = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -113,6 +114,11 @@ class Book(Base):
     # The single author this book "belongs to" in list/release views.
     # NULL-safe: code falls back to the first role='author' BookAuthor row when NULL.
     primary_author_id = Column(Integer, ForeignKey("authors.id", ondelete="SET NULL"), nullable=True)
+
+    # True when the user explicitly picked the primary author (PATCH /books/{id});
+    # scans then never reassign it.  False = "billing order wins": the linked
+    # author with the lowest author_order becomes primary on each scan.
+    primary_author_manual = Column(Boolean, nullable=False, server_default=expression.false())
 
     # Canonical deduplication (v0.69.0+)
     # When non-NULL, this row is a duplicate of the referenced book and is
@@ -154,8 +160,11 @@ class Watchlist(Base):
     author_id    = Column(Integer, ForeignKey("authors.id", ondelete="CASCADE"), unique=True, nullable=False)
     last_scanned = Column(TIMESTAMP(timezone=True))
     next_scan    = Column(TIMESTAMP(timezone=True))
-    scan_enabled = Column(Boolean, server_default="true", nullable=False)
-    favorite     = Column(Boolean, server_default="false", nullable=False)
+    scan_enabled = Column(Boolean, server_default=expression.true(), nullable=False)
+    favorite     = Column(Boolean, server_default=expression.false(), nullable=False)
+    # Opt-in: auto-grab this author's HIGH-confidence released missing books
+    # after each scan (behavior governed by download_preferences.auto_download_mode).
+    auto_download = Column(Boolean, server_default=expression.false(), nullable=False)
     created_at   = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     author = relationship("Author", back_populates="watchlist_entry")
@@ -168,7 +177,7 @@ class LibraryPath(Base):
     id           = Column(Integer, primary_key=True)
     path         = Column(Text, nullable=False, unique=True)
     name         = Column(Text)
-    scan_enabled = Column(Boolean, server_default="true", nullable=False)
+    scan_enabled = Column(Boolean, server_default=expression.true(), nullable=False)
     last_scanned = Column(TIMESTAMP(timezone=True))
     created_at   = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -181,7 +190,7 @@ class Webhook(Base):
     url           = Column(Text, nullable=False, unique=True)
     description   = Column(Text)
     events        = Column(ARRAY(Text))   # e.g. ['book.discovered', 'scan.complete']
-    active        = Column(Boolean, server_default="true", nullable=False)
+    active        = Column(Boolean, server_default=expression.true(), nullable=False)
     failure_count = Column(Integer, server_default="0", nullable=False)
     disabled_at   = Column(TIMESTAMP(timezone=True))
     created_at    = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -227,6 +236,17 @@ class DownloadAttempt(Base):
 # ---------------------------------------------------------------------------
 # Indexes (defined outside models for clarity)
 # ---------------------------------------------------------------------------
+Index("ix_books_asin",                 Book.asin)
+Index("ix_books_isbn",                 Book.isbn)
+# Partial unique indexes: one LIVE (unmerged, undeleted) book per identifier.
+# The condition is given for both dialects so the SQLite test DB enforces the
+# same rule as production Postgres.
+_live_asin = (Book.asin.isnot(None) & Book.canonical_book_id.is_(None) & Book.deleted.is_(False))
+_live_isbn13 = (Book.isbn13.isnot(None) & Book.canonical_book_id.is_(None) & Book.deleted.is_(False))
+Index("uq_books_asin_live", Book.asin, unique=True,
+      postgresql_where=_live_asin, sqlite_where=_live_asin)
+Index("uq_books_isbn13_live", Book.isbn13, unique=True,
+      postgresql_where=_live_isbn13, sqlite_where=_live_isbn13)
 Index("ix_books_isbn13",               Book.isbn13)
 Index("ix_books_confidence_band",      Book.confidence_band)
 Index("ix_books_have_it",              Book.have_it)
@@ -235,3 +255,9 @@ Index("ix_books_canonical_book_id",    Book.canonical_book_id)
 Index("ix_authors_name_sort",          Author.name_sort)
 Index("ix_book_authors_author_id",     BookAuthor.author_id)
 Index("ix_webhook_deliveries_webhook", WebhookDelivery.webhook_id)
+# Created by migrations 0003 / 0010 — declared here so autogenerate doesn't
+# emit drop_index diffs for them.
+Index("ix_author_aliases_alias",       AuthorAlias.alias)
+Index("ix_author_aliases_author_id",   AuthorAlias.author_id)
+Index("ix_download_attempts_book_id",    DownloadAttempt.book_id)
+Index("ix_download_attempts_created_at", DownloadAttempt.created_at)

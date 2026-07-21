@@ -14,8 +14,7 @@ import httpx
 from config import get_config
 from core.search import (
     humanize_size,
-    send_to_sabnzbd,
-    send_to_torrent_client,
+    send_release,
     unified_search,
     fetch_download_queue,
     check_prowlarr_status,
@@ -77,39 +76,22 @@ async def download(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     config = get_config()
-    dl = getattr(config, "download", None)
-    preferred = getattr(dl, "preferred", "") if dl else ""
 
     async with httpx.AsyncClient() as client:
-        if body.type == "nzb":
-            sabnzbd = getattr(dl, "sabnzbd", None) if dl else None
-            result = await send_to_sabnzbd(
-                client,
-                body.url,
-                body.title,
-                sabnzbd_url=getattr(sabnzbd, "url", "") if sabnzbd else "",
-                api_key=getattr(sabnzbd, "api_key", "") if sabnzbd else "",
-                category=body.category or getattr(sabnzbd, "default_category", "") if sabnzbd else body.category,
-            )
-        else:
-            torrent = getattr(dl, "torrent", None) if dl else None
-            result = await send_to_torrent_client(
-                client,
-                body.url,
-                body.title,
-                client_type=getattr(torrent, "type", "qbittorrent") if torrent else "qbittorrent",
-                client_url=getattr(torrent, "url", "") if torrent else "",
-                username=getattr(torrent, "username", "") if torrent else "",
-                password=getattr(torrent, "password", "") if torrent else "",
-                category=body.category or getattr(torrent, "default_category", "") if torrent else body.category,
-                tag=body.tag or getattr(torrent, "default_tag", "") if torrent else body.tag,
-                save_path=body.save_path or getattr(torrent, "save_path", "") if torrent else body.save_path,
-                book_id=body.book_id,
-            )
+        result = await send_release(
+            client,
+            config,
+            url=body.url,
+            title=body.title,
+            release_type=body.type,
+            category=body.category,
+            tag=body.tag,
+            save_path=body.save_path,
+            book_id=body.book_id,
+        )
 
     success = result.get("success", False)
     from db.models import DownloadAttempt
-    from db.session import get_session as _gs  # already imported via Depends above
     attempt = DownloadAttempt(
         book_id=body.book_id or None,
         release_title=body.title,

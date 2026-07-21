@@ -28,6 +28,10 @@ services:
       - DATABASE_URL=postgresql+asyncpg://bookscout:${POSTGRES_PASSWORD:-bookscout}@postgres/bookscout
       - REDIS_URL=redis://redis:6379
       - BOOKSCOUT_CONFIG=/data/config.yaml
+      # Bearer-token auth: set SECRET_KEY in .env to require
+      # "Authorization: Bearer <SECRET_KEY>" on all API requests.
+      # Left unset, the API is UNAUTHENTICATED.
+      - SECRET_KEY=${SECRET_KEY:-}
       # Optional env-var overrides (or put these in /data/config.yaml instead)
       - AUDIOBOOKSHELF_URL=${AUDIOBOOKSHELF_URL:-}
       - AUDIOBOOKSHELF_TOKEN=${AUDIOBOOKSHELF_TOKEN:-}
@@ -62,6 +66,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     restart: unless-stopped
     networks:
       - bookscout
@@ -177,7 +187,7 @@ services:
       - "${UI_PORT:-8080}:80"
     depends_on:
       bookscout:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - bookscout

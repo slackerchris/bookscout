@@ -31,6 +31,7 @@ class AuthorCreate(BaseModel):
 class AuthorUpdate(BaseModel):
     name: str | None = None
     active: bool | None = None
+    auto_download: bool | None = None  # watchlist flag: auto-grab new HIGH-confidence books
 
 
 class WatchlistSettings(BaseModel):
@@ -86,6 +87,7 @@ class AuthorOut(BaseModel):
 class AuthorDetailOut(AuthorOut):
     book_count: int = 0
     owned_count: int = 0
+    auto_download: bool = False
 
 
 class LanguageCount(BaseModel):
@@ -353,6 +355,7 @@ async def list_authors(
             Watchlist.last_scanned,
             func.coalesce(bc_sq.c.bc, 0).label("book_count"),
             func.coalesce(oc_sq.c.oc, 0).label("owned_count"),
+            Watchlist.auto_download,
         )
         .outerjoin(Watchlist, Watchlist.author_id == Author.id)
         .outerjoin(bc_sq, bc_sq.c.author_id == Author.id)
@@ -378,6 +381,7 @@ async def list_authors(
             last_scanned=row[1],
             book_count=row[2],
             owned_count=row[3],
+            auto_download=bool(row[4]),
             created_at=row[0].created_at,
         )
         for row in rows
@@ -394,8 +398,13 @@ async def create_author(
     body: AuthorCreate,
     session: AsyncSession = Depends(get_session),
 ) -> Author:
-    existing = await session.execute(select(Author).where(Author.name.ilike(body.name)))
-    if existing.scalar_one_or_none():
+    # Compare on the normalised key rather than ilike(): an ilike pattern
+    # treats % and _ in the submitted name as wildcards, and case-insensitive
+    # equality misses variants like "J.N. Chaney" vs "JN Chaney" anyway.
+    existing = await session.execute(
+        select(Author).where(Author.name_normalized == normalize_author_key(body.name))
+    )
+    if existing.scalars().first():
         raise HTTPException(status_code=409, detail="Author already exists")
 
     author = Author(name=body.name, name_sort=sort_name(body.name), name_normalized=normalize_author_key(body.name))
@@ -443,6 +452,7 @@ async def get_author(
         last_scanned=wl.last_scanned if wl else None,
         book_count=book_count,
         owned_count=owned_count,
+        auto_download=bool(wl.auto_download) if wl else False,
         created_at=author.created_at,
     )
 
@@ -500,8 +510,20 @@ async def update_author(
     if body.name is not None:
         author.name = body.name
         author.name_sort = sort_name(body.name)
+        author.name_normalized = normalize_author_key(body.name)
     if body.active is not None:
         author.active = body.active
+    if body.auto_download is not None:
+        wl_q = await session.execute(
+            select(Watchlist).where(Watchlist.author_id == author_id)
+        )
+        wl = wl_q.scalar_one_or_none()
+        if wl is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Author is not on the watchlist — watch the author before enabling auto-download",
+            )
+        wl.auto_download = body.auto_download
     await session.commit()
     await session.refresh(author)
     return author

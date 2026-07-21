@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.enqueue import enqueue_unique
 from db.models import LibraryPath
 from db.session import get_session
 
@@ -99,12 +100,13 @@ async def enqueue_library_scan(
     if arq is None:
         raise HTTPException(status_code=503, detail="Job queue unavailable")
 
-    job = await arq.enqueue_job("scan_library_path_task", path_id)
+    job_id = f"scan-library-path-{path_id}"
+    job = await enqueue_unique(arq, "scan_library_path_task", path_id, job_id=job_id)
     return {
-        "job_id": job.job_id,
+        "job_id": job.job_id if job else job_id,
         "library_path_id": path_id,
         "path": lp.path,
-        "status": "queued",
+        "status": "queued" if job else "already_queued",
     }
 
 
@@ -114,5 +116,8 @@ async def enqueue_all_library_scans(request: Request):
     if arq is None:
         raise HTTPException(status_code=503, detail="Job queue unavailable")
 
-    job = await arq.enqueue_job("scan_all_library_paths_task")
-    return {"job_id": job.job_id, "status": "queued"}
+    job = await enqueue_unique(arq, "scan_all_library_paths_task", job_id="scan-all-library-paths")
+    return {
+        "job_id": job.job_id if job else "scan-all-library-paths",
+        "status": "queued" if job else "already_queued",
+    }

@@ -56,3 +56,10 @@ postprocess:
   # "client"    — Your download client handles post-processing (default).
   mode: client
   library_root: ""  # absolute path, required when mode = bookscout
+  # Automatically import completed qBittorrent downloads.  BookScout tags
+  # every torrent it sends with "bookscout-<book_id>"; the worker polls for
+  # completed torrents carrying that tag, imports them, and marks them
+  # "bs-imported" (or "bs-failed" — remove that tag in qBittorrent to retry).
+  # Only active when mode = bookscout and download.torrent is qBittorrent.
+  auto_import: true
+  auto_import_interval_minutes: 2

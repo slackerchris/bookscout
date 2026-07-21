@@ -66,6 +66,11 @@ _DEFAULT: dict = {
         # "client"    = download client is responsible (e.g. via its own post-processing scripts)
         "mode": "client",
         "library_root": "",  # required when mode = "bookscout"
+        # Poll qBittorrent for completed BookScout torrents (tagged bookscout-<id>)
+        # and import them automatically.  Only active when mode = "bookscout" and
+        # a qBittorrent download client is configured.
+        "auto_import": True,
+        "auto_import_interval_minutes": 2,
     },
 }
 

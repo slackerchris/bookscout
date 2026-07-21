@@ -25,6 +25,10 @@ class DownloadPreferences(BaseModel):
     language: str = "en"
     require_unabridged: bool = False
     max_size_gb: float = 0            # 0 = no limit
+    # Behavior for authors with watchlist.auto_download enabled:
+    # "approval" — record best match as a pending attempt for one-click approval
+    # "auto"     — send the best match straight to the download client
+    auto_download_mode: str = "approval"
 
 
 class DownloadPreferencesUpdate(BaseModel):
@@ -33,6 +37,7 @@ class DownloadPreferencesUpdate(BaseModel):
     language: str | None = None
     require_unabridged: bool | None = None
     max_size_gb: float | None = None
+    auto_download_mode: str | None = None
 
 
 # ---------------------------------------------------------------------------

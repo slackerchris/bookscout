@@ -1,0 +1,32 @@
+# BookScout systemd service file (arq background worker)
+#
+# Runs scheduled scans, author scans, library scans, and download imports.
+# Required alongside bookscout.service — without it, queued jobs never execute.
+#
+# Installation:
+# 1. Copy this file to /etc/systemd/system/bookscout-worker.service
+# 2. Update paths and user below (match bookscout.service)
+# 3. Run: sudo systemctl daemon-reload
+# 4. Run: sudo systemctl enable bookscout-worker
+# 5. Run: sudo systemctl start bookscout-worker
+
+[Unit]
+Description=BookScout background worker (arq)
+After=network.target bookscout.service
+
+[Service]
+Type=simple
+User=your-username
+Group=your-username
+WorkingDirectory=/path/to/bookscout
+Environment="PATH=/path/to/venv/bin"
+ExecStart=/path/to/venv/bin/arq workers.settings.WorkerSettings
+Restart=always
+RestartSec=10
+
+# Optional: Environment variables (match bookscout.service)
+# Environment="AUDIOBOOKSHELF_URL=http://localhost:13378"
+# Environment="AUDIOBOOKSHELF_TOKEN=your_token"
+
+[Install]
+WantedBy=multi-user.target

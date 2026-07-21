@@ -56,18 +56,28 @@ async def _generate(request: Request) -> AsyncGenerator[str, None]:
                 yield "data: {\"event\": \"connection.timeout\"}\n\n"
                 break
 
-            msg = await pubsub.get_message(
-                ignore_subscribe_messages=True, timeout=0.5
-            )
-            if msg and msg["type"] == "message":
-                raw = msg["data"]
-                text = raw.decode() if isinstance(raw, bytes) else raw
-                yield f"data: {text}\n\n"
-            else:
-                if now - last_heartbeat >= 30:
-                    yield ": heartbeat\n\n"
-                    last_heartbeat = now
+            # Drain everything already queued so event bursts (e.g. during a
+            # scan-all) are forwarded immediately instead of ~1 msg/sec.
+            delivered = False
+            while True:
+                msg = await pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=0.5
+                )
+                if msg is None:
+                    break
+                if msg["type"] == "message":
+                    raw = msg["data"]
+                    text = raw.decode() if isinstance(raw, bytes) else raw
+                    yield f"data: {text}\n\n"
+                    delivered = True
 
-            await asyncio.sleep(1)
+            if not delivered and now - last_heartbeat >= 30:
+                yield ": heartbeat\n\n"
+                last_heartbeat = now
+
+            await asyncio.sleep(0.5)
     finally:
         await pubsub.unsubscribe("bookscout:events")
+        # unsubscribe alone leaves the underlying Redis connection open —
+        # each SSE client would leak one for the server's lifetime.
+        await pubsub.aclose()

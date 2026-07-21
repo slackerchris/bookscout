@@ -1,5 +1,35 @@
 # BookScout Changelog
 
+## [0.69.0] - 2026-07-21
+
+### Added
+- **Auto-download rules** — per-author opt-in (`watchlist.auto_download`, migration 0015, `PATCH /authors/{id}`) that, after each scan, searches the indexers for the author's HIGH-confidence released missing books and either sends the best match to the download client (`auto_download_mode: auto`) or records it as a *pending* attempt for one-click approval (`auto_download_mode: approval`, the default — new field on `/settings/download-preferences`). Best-match selection applies min-seeders/max-size as hard filters and preferred format as a soft filter. New `POST /download-history/{id}/approve` and `/dismiss` endpoints; `GET /download-history/` gained a `status` filter. Emits `autodownload.pending|sent|failed` SSE events. Guardrails: unreleased/undated books never grabbed, queued/pending attempts never repeated, 24 h cooldown after failures, co-authored books grab under their primary author only.
+- **Native qBittorrent auto-import poller** — `poll_completed_downloads_task` (cron, `postprocess.auto_import_interval_minutes`, default every 2 min) replaces the external n8n workflow: finds completed torrents tagged `bookscout-<id>`, runs the normal import pipeline, and tags `bs-imported` / `bs-failed`. Credentials come from config.yaml only. Active when `postprocess.mode: bookscout` + a qBittorrent client are configured (`postprocess.auto_import: true`).
+- **Series view** — `GET /api/v1/series` groups the catalog by (series, primary author) with per-position ownership and *unknown gap* detection (own 1, 2, 4 → flags 3 as absent from the catalog). Supports `missing_only`, `author_id`, `min_books`.
+- **Billing-order primary author** — the linked author with the lowest `author_order` (top billing at the source, e.g. J.N. Chaney on his collaborations) now becomes `primary_author_id` on every insert/update, with deterministic tie-breaks. New `books.primary_author_manual` flag (migration 0014): `PATCH /books/{id}` with a `primary_author_id` pins the choice against scan reassignment; send `primary_author_manual: false` to unpin.
+- **Identifier uniqueness backstop** — migration 0013 soft-merges existing duplicate books sharing an ASIN/ISBN-13, then adds partial unique indexes over live rows; concurrent scans that race on an insert now recover by linking to the winner's row instead of creating a duplicate. Plus plain indexes on `books.asin`/`books.isbn` (migration 0012) for the per-scan identifier lookups.
+- **Queue-level scan dedup** — all scan enqueues use stable job IDs (`scan-author-{id}` …), so double-clicked buttons and cron overlaps return `already_queued` instead of racing.
+- **Worker systemd unit** — new `bookscout-worker.service`; `bookscout.service` now runs `alembic upgrade head` on start and documents that the worker unit is required.
+
+### Fixed
+- **`/books/export`, `/books/duplicates`, `/books/co-author-conflicts` were unreachable** — registered after `GET /books/{book_id}`, so FastAPI matched the dynamic route first and returned 422. Routes reordered; export also no longer emits co-authored books twice and uses timezone-aware timestamps.
+- **ABS ownership sync only read page 0** — `page += 1` sat outside the pagination loop in `fetch_abs_books_for_author`, so authors with 100+ ABS items never had the remainder indexed. Also: empty author-ID resolutions are no longer negative-cached forever.
+- **Migration 0002 dedup guard was a no-op** — the `NOT IN` tuple compared the duplicate's own `book_id`, so it filtered nothing and the UPDATE could violate the composite PK, aborting `alembic upgrade head` on fresh deployments with duplicates. Guard now compares `(author_id, role)`.
+- **Corrupt Redis cache entry aborted scans for up to 24 h** — `_cached_query` closed the query coroutine before parsing the cached JSON; a corrupt value then hit `await` on a closed coroutine. Parse-then-close now, and empty results (what every source returns on outage/429) are cached for at most 5 minutes instead of the full TTL.
+- **Auth middleware broke CORS preflight** — `BearerTokenMiddleware` ran outside `CORSMiddleware`, 401-ing header-less `OPTIONS` requests whenever a real `secret_key` was set. CORS is now outermost; token comparison uses `hmac.compare_digest`; public-path matching is boundary-aware; credentialed CORS only applies with an explicit origin allowlist.
+- **Co-author discovery created duplicate authors** — it resolved names with an exact-match query instead of the full alias/normalized/fuzzy chain, so "J.N. Chaney" vs "JN Chaney" produced a second Author + Watchlist row.
+- **`POST /books/{id}/rescan` 500ed on co-authored books** (`scalar_one_or_none` with multiple `role='author'` rows) — now uses `primary_author_id` with an ordered fallback.
+- **ABS-synced books were invisible to primary-author endpoints** — `sync_books` never set `primary_author_id`; now set on create and backfilled on update.
+- **Author rename left `name_normalized` stale**, re-creating duplicates on later imports; author-create dedup no longer treats `%`/`_` as LIKE wildcards.
+- **Cron weekday off by one** — crontab `0` (Sunday) ran Mondays (arq is Monday-0); the parser also crashed on legal syntax like `1-5,7`, `mon-fri`, `*/10`, silently disabling scheduled scans.
+- **Multi-disc imports dropped every disc after the first** — audio files were deduped by bare filename, so `CD2/Track01.mp3` was discarded; dedup is now by resolved path with parent-dir disambiguation at the flat destination.
+- **`PATCH /books/{id}` could never clear a field** (`exclude_none` → `exclude_unset`); an explicit `null` now clears, e.g. un-merging via `canonical_book_id: null`.
+- **SSE stream leaked a Redis connection per client** (missing `aclose`) and drained at most ~1 event/sec during bursts.
+- **arq pool leaked once per scan-all cron run**; the SQLite→PG migration script and misc endpoints got smaller fixes (bulk delete for clear-history, webhook URL validation, `config.yaml` `database.url` honored, `SECRET_KEY` passthrough + healthchecks in docker-compose, blocking filesystem walk moved off the event loop).
+
+### Removed
+- **Legacy root `test_confidence.py`** (uncollected duplicate of `tests/test_confidence.py`). Suite is now 142 tests.
+
 ## [0.68.0] - 2026-06-04
 
 ### Added

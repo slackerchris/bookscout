@@ -24,7 +24,8 @@ from datetime import datetime, timezone
 from typing import Any, Coroutine, TypedDict
 
 import httpx
-from sqlalchemy import and_, delete, select
+from sqlalchemy import and_, delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from confidence import score_books
@@ -426,6 +427,30 @@ async def _persist_scan_results(
                     await _update_existing_book(
                         session, existing, book, fields, author_id, is_cross_author, co_author_cache
                     )
+        except IntegrityError:
+            # Lost an insert race with a concurrent scan of a co-author: the
+            # partial unique index on asin/isbn13 rejected our row.  Re-find
+            # the winner's row and link/update it instead of dropping the book.
+            existing, is_cross_author = await _find_existing_book(
+                session, author_id, book, title_index
+            )
+            if existing is None or existing.deleted:
+                logger.warning(
+                    "Insert conflict but no existing book found — skipping",
+                    extra={"author_id": author_id, "title": book.get("title")},
+                )
+                continue
+            try:
+                async with session.begin_nested():
+                    await _update_existing_book(
+                        session, existing, book, fields, author_id, is_cross_author, co_author_cache
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to persist book after insert conflict",
+                    extra={"author_id": author_id, "title": book.get("title")},
+                )
+                continue
         except Exception:
             logger.exception(
                 "Failed to persist book",
@@ -629,6 +654,8 @@ async def _insert_new_book(
                 author_order=fields["co_author_orders"].get(co_name),
             ))
 
+    await _apply_billing_order_primary(session, new_book)
+
     in_discovered = bool(book.get("confidence_band") in ("high", "medium") or have_it_bool)
     return new_book, in_discovered
 
@@ -721,6 +748,21 @@ async def _update_existing_book(
         )
     )
     existing_co_ids: set[int] = {row[0] for row in existing_co_result.fetchall()}
+
+    # Refresh the scanning author's billing position — it feeds the
+    # billing-order primary-author rule and may have changed at the source.
+    await session.execute(
+        update(BookAuthor)
+        .where(
+            and_(
+                BookAuthor.book_id == existing.id,
+                BookAuthor.author_id == author_id,
+                BookAuthor.role == "author",
+            )
+        )
+        .values(author_order=fields["scanning_author_order"])
+    )
+
     fresh_co_ids: set[int] = set()
     for co_name in fields["co_authors"]:
         co_author = co_author_cache.get(co_name)
@@ -732,6 +774,18 @@ async def _update_existing_book(
                     role="co-author",
                     author_order=fields["co_author_orders"].get(co_name),
                 ))
+            elif co_author.id in existing_co_ids:
+                await session.execute(
+                    update(BookAuthor)
+                    .where(
+                        and_(
+                            BookAuthor.book_id == existing.id,
+                            BookAuthor.author_id == co_author.id,
+                            BookAuthor.role == "co-author",
+                        )
+                    )
+                    .values(author_order=fields["co_author_orders"].get(co_name))
+                )
             fresh_co_ids.add(co_author.id)
     for stale_id in existing_co_ids - fresh_co_ids:
         await session.execute(
@@ -743,6 +797,37 @@ async def _update_existing_book(
                 )
             )
         )
+
+    await _apply_billing_order_primary(session, existing)
+
+
+async def _apply_billing_order_primary(session: AsyncSession, book_obj: Book) -> None:
+    """Billing order wins: point primary_author_id at the top-billed author.
+
+    The linked author with the lowest ``author_order`` (position 0 = first
+    billing in the source metadata, e.g. J.N. Chaney on his collaborations)
+    becomes the primary author.  Links without billing information are
+    ignored; if none carry it, the current primary (first discoverer) stays.
+    Never touches books the user has pinned via ``primary_author_manual``.
+    """
+    if book_obj.primary_author_manual:
+        return
+    result = await session.execute(
+        select(BookAuthor.author_id, BookAuthor.author_order).where(
+            and_(
+                BookAuthor.book_id == book_obj.id,
+                BookAuthor.author_order.isnot(None),
+            )
+        )
+    )
+    rows = result.all()
+    if not rows:
+        return
+    # Tie-break equal billing by author_id so the outcome is deterministic
+    # regardless of scan order.
+    best_author_id, _ = min(rows, key=lambda r: (r[1], r[0]))
+    if book_obj.primary_author_id != best_author_id:
+        book_obj.primary_author_id = best_author_id
 
 
 async def _cleanup_language(
@@ -802,8 +887,10 @@ async def _process_coauthor_discovery(
     """Return co-author names not yet on the watchlist; optionally auto-add them."""
     discovered: list[str] = []
     for co_name in sorted(co_names):
-        co_q = await session.execute(select(Author).where(Author.name == co_name))
-        co_obj = co_q.scalar_one_or_none()
+        # Full resolution chain (exact → alias → normalised → fuzzy) — an
+        # exact-name lookup alone would miss variants like "J.N. Chaney" vs
+        # "JN Chaney" and create a duplicate Author + Watchlist entry.
+        co_obj = await _find_author(session, co_name)
         on_watchlist = False
         if co_obj:
             wl_check = await session.execute(
@@ -813,13 +900,7 @@ async def _process_coauthor_discovery(
         if not on_watchlist:
             if auto_add_coauthors:
                 if not co_obj:
-                    co_obj = Author(
-                        name=co_name,
-                        name_sort=sort_name(co_name),
-                        name_normalized=normalize_author_key(co_name),
-                    )
-                    session.add(co_obj)
-                    await session.flush()
+                    co_obj = await _get_or_create_author(session, co_name)
                 session.add(Watchlist(author_id=co_obj.id))
             discovered.append(co_name)
     return discovered
@@ -1070,20 +1151,30 @@ async def _cached_query(
     if redis_client is None or ttl_seconds <= 0:
         return await coro
 
+    cached_result: list[dict[str, Any]] | None = None
     try:
         cached = await redis_client.get(key)
         if cached is not None:
+            # Parse BEFORE closing the coroutine: a corrupt cache entry must
+            # fall through to a live query, which needs the coroutine intact.
+            cached_result = json.loads(cached)
             logger.debug("Cache hit", extra={"key": key})
-            coro.close()  # prevent "coroutine was never awaited" warning
-            return json.loads(cached)
     except Exception as exc:
         logger.warning("Cache read failed", extra={"key": key, "error": str(exc)})
+
+    if cached_result is not None:
+        coro.close()  # prevent "coroutine was never awaited" warning
+        return cached_result
 
     result = await coro
 
     try:
-        await redis_client.set(key, json.dumps(result), ex=ttl_seconds)
-        logger.debug("Cache stored", extra={"key": key, "ttl": ttl_seconds})
+        # The metadata query functions return [] on any HTTP failure, so an
+        # empty result may be an outage or rate limit rather than a truly
+        # empty catalog — cache it briefly instead of for the full TTL.
+        expiry = ttl_seconds if result else min(ttl_seconds, 300)
+        await redis_client.set(key, json.dumps(result), ex=expiry)
+        logger.debug("Cache stored", extra={"key": key, "ttl": expiry})
     except Exception as exc:
         logger.warning("Cache write failed", extra={"key": key, "error": str(exc)})
 

@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import DownloadAttempt
@@ -60,13 +60,13 @@ class DownloadAttemptCreate(BaseModel):
 @router.get("/", response_model=list[DownloadAttemptOut], summary="List recent download attempts")
 async def list_history(
     limit: int = Query(100, ge=1, le=500),
+    status: str | None = Query(None, description="Filter: queued | pending | failed | dismissed"),
     session: AsyncSession = Depends(get_session),
 ) -> list[DownloadAttempt]:
-    result = await session.execute(
-        select(DownloadAttempt)
-        .order_by(DownloadAttempt.created_at.desc())
-        .limit(limit)
-    )
+    q = select(DownloadAttempt).order_by(DownloadAttempt.created_at.desc()).limit(limit)
+    if status:
+        q = q.where(DownloadAttempt.status == status)
+    result = await session.execute(q)
     return list(result.scalars().all())
 
 
@@ -82,12 +82,72 @@ async def create_attempt(
     return attempt
 
 
+@router.post(
+    "/{attempt_id}/approve",
+    response_model=DownloadAttemptOut,
+    summary="Approve a pending auto-download and send it to the client",
+)
+async def approve_attempt(
+    attempt_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> DownloadAttempt:
+    import httpx
+    from config import get_config
+    from core.search import send_release
+
+    attempt = await session.get(DownloadAttempt, attempt_id)
+    if attempt is None:
+        raise HTTPException(status_code=404, detail="Download attempt not found")
+    if attempt.status != "pending":
+        raise HTTPException(status_code=409, detail=f"Attempt is '{attempt.status}', not pending")
+    if not attempt.download_url:
+        raise HTTPException(status_code=422, detail="Attempt has no download URL")
+
+    async with httpx.AsyncClient() as client:
+        result = await send_release(
+            client,
+            get_config(),
+            url=attempt.download_url,
+            title=attempt.release_title,
+            release_type=attempt.type or "torrent",
+            book_id=attempt.book_id or 0,
+        )
+
+    success = bool(result.get("success"))
+    attempt.status = "queued" if success else "failed"
+    attempt.error_detail = None if success else result.get("detail")
+    await session.commit()
+    await session.refresh(attempt)
+    if not success:
+        raise HTTPException(status_code=502, detail=result.get("detail", "Download client returned an error"))
+    return attempt
+
+
+@router.post(
+    "/{attempt_id}/dismiss",
+    response_model=DownloadAttemptOut,
+    summary="Dismiss a pending auto-download without sending it",
+)
+async def dismiss_attempt(
+    attempt_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> DownloadAttempt:
+    attempt = await session.get(DownloadAttempt, attempt_id)
+    if attempt is None:
+        raise HTTPException(status_code=404, detail="Download attempt not found")
+    if attempt.status != "pending":
+        raise HTTPException(status_code=409, detail=f"Attempt is '{attempt.status}', not pending")
+    attempt.status = "dismissed"
+    await session.commit()
+    await session.refresh(attempt)
+    return attempt
+
+
 @router.delete("/", summary="Clear all download history")
 async def clear_history(session: AsyncSession = Depends(get_session)) -> dict:
-    result = await session.execute(select(DownloadAttempt))
-    rows = result.scalars().all()
-    count = len(rows)
-    for row in rows:
-        await session.delete(row)
+    count = (
+        await session.execute(select(func.count(DownloadAttempt.id)))
+    ).scalar_one()
+    await session.execute(delete(DownloadAttempt))
     await session.commit()
     return {"deleted": count}

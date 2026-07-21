@@ -1,11 +1,16 @@
-# BookScout systemd service file
-# 
+# BookScout systemd service file (API)
+#
+# NOTE: this unit runs only the API. Scheduled scans, imports, and every
+# queued job are executed by the arq worker — install bookscout-worker.service
+# alongside this one or no background job will ever run.
+#
 # Installation:
 # 1. Copy this file to /etc/systemd/system/bookscout.service
+#    (and bookscout-worker.service to /etc/systemd/system/)
 # 2. Update paths and user below
 # 3. Run: sudo systemctl daemon-reload
-# 4. Run: sudo systemctl enable bookscout
-# 5. Run: sudo systemctl start bookscout
+# 4. Run: sudo systemctl enable bookscout bookscout-worker
+# 5. Run: sudo systemctl start bookscout bookscout-worker
 
 [Unit]
 Description=BookScout - Multi-source book discovery
@@ -17,6 +22,8 @@ User=your-username
 Group=your-username
 WorkingDirectory=/path/to/bookscout
 Environment="PATH=/path/to/venv/bin"
+# Apply pending DB migrations before starting the API
+ExecStartPre=/path/to/venv/bin/alembic upgrade head
 ExecStart=/path/to/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8765
 Restart=always
 RestartSec=10

@@ -1,16 +1,19 @@
 """Books CRUD."""
 from __future__ import annotations
 
-from datetime import datetime
+import json as _json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import Response as FastAPIResponse
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_config
+from core.enqueue import author_scan_job_id, enqueue_unique
 from core.metadata import normalize_language_code
 from core.normalize import normalize_title_key, sort_title
 from core.search import humanize_size, unified_search
@@ -54,6 +57,7 @@ class BookOut(BaseModel):
     deleted: bool
     match_method: str
     primary_author_id: int | None = None
+    primary_author_manual: bool = False
     canonical_book_id: int | None = None
     created_at: datetime
     updated_at: datetime
@@ -95,6 +99,7 @@ class BookUpdate(BaseModel):
     narrator: str | None = None
     release_date: str | None = None
     primary_author_id: int | None = None
+    primary_author_manual: bool | None = None
     canonical_book_id: int | None = None
 
 
@@ -178,7 +183,7 @@ async def upcoming_books(
     primary author only.  Canonical duplicates (canonical_book_id IS NOT NULL)
     are excluded.
     """
-    today = datetime.utcnow().date().isoformat()
+    today = datetime.now(timezone.utc).date().isoformat()
     q = (
         select(Book, Author.id, Author.name)
         .join(Author, Author.id == Book.primary_author_id)
@@ -200,7 +205,7 @@ async def upcoming_books(
 
 @router.get("/summary", summary="Book catalog summary")
 async def book_summary(session: AsyncSession = Depends(get_session)) -> dict:
-    today = datetime.utcnow().date().isoformat()
+    today = datetime.now(timezone.utc).date().isoformat()
 
     async def count_where(*conditions) -> int:
         result = await session.execute(
@@ -325,134 +330,9 @@ async def list_books(
     return [_normalise_book_language(book) for book in result.scalars().all()]
 
 
-@router.get("/{book_id}", response_model=BookOut, summary="Get a single book")
-async def get_book(
-    book_id: int,
-    session: AsyncSession = Depends(get_session),
-) -> Book:
-    book = await _get_or_404(session, book_id)
-    return _normalise_book_language(book)
-
-
-@router.patch("/{book_id}", response_model=BookOut, summary="Update book fields")
-async def update_book(
-    book_id: int,
-    body: BookUpdate,
-    session: AsyncSession = Depends(get_session),
-) -> Book:
-    book = await _get_or_404(session, book_id)
-    for field, value in body.model_dump(exclude_none=True).items():
-        if field == "language":
-            value = normalize_language_code(value)
-        elif field == "title":
-            book.title_sort = sort_title(value)
-        setattr(book, field, value)
-    await session.commit()
-    await session.refresh(book)
-    return _normalise_book_language(book)
-
-
-@router.delete(
-    "/{book_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Soft-delete a book",
-)
-async def delete_book(
-    book_id: int,
-    session: AsyncSession = Depends(get_session),
-) -> None:
-    book = await _get_or_404(session, book_id)
-    book.deleted = True
-    await session.commit()
-
-
-@router.post("/{book_id}/search", summary="Search indexers for a specific book")
-async def search_for_book(
-    book_id: int,
-    session: AsyncSession = Depends(get_session),
-) -> list[dict]:
-    """
-    Auto-constructs an indexer search query from the book's title and primary
-    author name, then queries all configured Prowlarr / Jackett indexers.
-    Returns the same result shape as ``POST /api/v1/search/``.
-    """
-    book = await _get_or_404(session, book_id)
-
-    author_result = await session.execute(
-        select(Author.name)
-        .where(Author.id == book.primary_author_id)
-    )
-    author_name = author_result.scalar_one_or_none() or ""
-
-    query = f"{book.title} {author_name}".strip() if author_name else book.title
-
-    config = get_config()
-    prowlarr = getattr(config, "prowlarr", None)
-    jackett = getattr(config, "jackett", None)
-
-    async with httpx.AsyncClient() as client:
-        results = await unified_search(
-            client,
-            query,
-            prowlarr_url=getattr(prowlarr, "url", "") if prowlarr else "",
-            prowlarr_key=getattr(prowlarr, "api_key", "") if prowlarr else "",
-            jackett_url=getattr(jackett, "url", "") if jackett else "",
-            jackett_key=getattr(jackett, "api_key", "") if jackett else "",
-        )
-
-    for r in results:
-        r["size_human"] = humanize_size(r.get("size", 0))
-
-    return results
-
-
-# ---------------------------------------------------------------------------
-# Rescan a single book's author
-# ---------------------------------------------------------------------------
-
-@router.post("/{book_id}/rescan", summary="Re-queue a metadata scan for this book's author")
-async def rescan_book(
-    book_id: int,
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """Enqueue a full author scan so metadata for this book is refreshed."""
-    book = await _get_or_404(session, book_id)
-
-    author_result = await session.execute(
-        select(Author)
-        .join(BookAuthor, and_(
-            BookAuthor.author_id == Author.id,
-            BookAuthor.book_id == book_id,
-            BookAuthor.role == "author",
-        ))
-    )
-    author = author_result.scalar_one_or_none()
-    if not author:
-        raise HTTPException(status_code=404, detail="No primary author found for this book")
-
-    pool = getattr(request.app.state, "arq_pool", None)
-    if pool is None:
-        raise HTTPException(status_code=503, detail="Job queue unavailable")
-
-    job = await pool.enqueue_job("scan_author_task", author.id)
-    return {
-        "job_id": job.job_id,
-        "author_id": author.id,
-        "author_name": author.name,
-        "book_id": book_id,
-        "book_title": book.title,
-        "status": "queued",
-    }
-
-
 # ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
-
-from fastapi.responses import Response as FastAPIResponse  # noqa: E402 (local import avoids circular)
-import json as _json
-
 
 @router.get("/export", summary="Export all books as a downloadable JSON file")
 async def export_books(
@@ -468,14 +348,22 @@ async def export_books(
     )
     result = await session.execute(q)
     books = []
+    seen_book_ids: set[int] = set()
     for book, author_id, author_name in result.all():
+        if book.id in seen_book_ids:
+            continue
+        seen_book_ids.add(book.id)
         bd = BookOut.model_validate(book).model_dump(mode="json")
         bd["author_id"] = author_id
         bd["author_name"] = author_name
         books.append(bd)
 
     payload = _json.dumps(
-        {"exported_at": datetime.utcnow().isoformat() + "Z", "total": len(books), "books": books},
+        {
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "total": len(books),
+            "books": books,
+        },
         indent=2,
         default=str,
     ).encode()
@@ -590,6 +478,142 @@ async def co_author_conflicts(
             "all_authors": book_author_map[book.id],
         })
     return out
+
+
+@router.get("/{book_id}", response_model=BookOut, summary="Get a single book")
+async def get_book(
+    book_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> Book:
+    book = await _get_or_404(session, book_id)
+    return _normalise_book_language(book)
+
+
+@router.patch("/{book_id}", response_model=BookOut, summary="Update book fields")
+async def update_book(
+    book_id: int,
+    body: BookUpdate,
+    session: AsyncSession = Depends(get_session),
+) -> Book:
+    book = await _get_or_404(session, book_id)
+    # exclude_unset (not exclude_none) so an explicit null clears a field,
+    # e.g. {"canonical_book_id": null} un-merges a book.
+    data = body.model_dump(exclude_unset=True)
+    # Explicitly choosing a primary author pins it against scan reassignment
+    # (billing-order rule).  Send {"primary_author_manual": false} to unpin.
+    if data.get("primary_author_id") is not None and "primary_author_manual" not in data:
+        data["primary_author_manual"] = True
+    for field, value in data.items():
+        if field == "language":
+            value = normalize_language_code(value)
+        elif field == "title":
+            book.title_sort = sort_title(value)
+        setattr(book, field, value)
+    await session.commit()
+    await session.refresh(book)
+    return _normalise_book_language(book)
+
+
+@router.delete(
+    "/{book_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Soft-delete a book",
+)
+async def delete_book(
+    book_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    book = await _get_or_404(session, book_id)
+    book.deleted = True
+    await session.commit()
+
+
+@router.post("/{book_id}/search", summary="Search indexers for a specific book")
+async def search_for_book(
+    book_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    """
+    Auto-constructs an indexer search query from the book's title and primary
+    author name, then queries all configured Prowlarr / Jackett indexers.
+    Returns the same result shape as ``POST /api/v1/search/``.
+    """
+    book = await _get_or_404(session, book_id)
+
+    author_result = await session.execute(
+        select(Author.name)
+        .where(Author.id == book.primary_author_id)
+    )
+    author_name = author_result.scalar_one_or_none() or ""
+
+    query = f"{book.title} {author_name}".strip() if author_name else book.title
+
+    config = get_config()
+    prowlarr = getattr(config, "prowlarr", None)
+    jackett = getattr(config, "jackett", None)
+
+    async with httpx.AsyncClient() as client:
+        results = await unified_search(
+            client,
+            query,
+            prowlarr_url=getattr(prowlarr, "url", "") if prowlarr else "",
+            prowlarr_key=getattr(prowlarr, "api_key", "") if prowlarr else "",
+            jackett_url=getattr(jackett, "url", "") if jackett else "",
+            jackett_key=getattr(jackett, "api_key", "") if jackett else "",
+        )
+
+    for r in results:
+        r["size_human"] = humanize_size(r.get("size", 0))
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Rescan a single book's author
+# ---------------------------------------------------------------------------
+
+@router.post("/{book_id}/rescan", summary="Re-queue a metadata scan for this book's author")
+async def rescan_book(
+    book_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Enqueue a full author scan so metadata for this book is refreshed."""
+    book = await _get_or_404(session, book_id)
+
+    if book.primary_author_id is not None:
+        author_result = await session.execute(
+            select(Author).where(Author.id == book.primary_author_id)
+        )
+    else:
+        author_result = await session.execute(
+            select(Author)
+            .join(BookAuthor, and_(
+                BookAuthor.author_id == Author.id,
+                BookAuthor.book_id == book_id,
+                BookAuthor.role == "author",
+            ))
+            .order_by(BookAuthor.author_order.asc().nullslast(), Author.name_sort)
+            .limit(1)
+        )
+    author = author_result.scalar_one_or_none()
+    if not author:
+        raise HTTPException(status_code=404, detail="No primary author found for this book")
+
+    pool = getattr(request.app.state, "arq_pool", None)
+    if pool is None:
+        raise HTTPException(status_code=503, detail="Job queue unavailable")
+
+    job_id = author_scan_job_id(author.id)
+    job = await enqueue_unique(pool, "scan_author_task", author.id, job_id=job_id)
+    return {
+        "job_id": job.job_id if job else job_id,
+        "author_id": author.id,
+        "author_name": author.name,
+        "book_id": book_id,
+        "book_title": book.title,
+        "status": "queued" if job else "already_queued",
+    }
 
 
 # ---------------------------------------------------------------------------

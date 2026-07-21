@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.enqueue import author_scan_job_id, enqueue_unique
 from db.models import Author, Book, Watchlist
 from db.session import get_session
 
@@ -37,20 +38,24 @@ async def scan_author(
     if not author:
         raise HTTPException(status_code=404, detail="Author not found")
 
-    job = await arq.enqueue_job("scan_author_task", author_id)
+    job_id = author_scan_job_id(author_id)
+    job = await enqueue_unique(arq, "scan_author_task", author_id, job_id=job_id)
     return {
-        "job_id": job.job_id,
+        "job_id": job.job_id if job else job_id,
         "author_id": author_id,
         "author_name": author.name,
-        "status": "queued",
+        "status": "queued" if job else "already_queued",
     }
 
 
 @router.post("/all", summary="Scan all active watchlist entries")
 async def scan_all(request: Request):
     arq = _arq_pool(request)
-    job = await arq.enqueue_job("scan_all_authors_task")
-    return {"job_id": job.job_id, "status": "queued"}
+    job = await enqueue_unique(arq, "scan_all_authors_task", job_id="scan-all-authors")
+    return {
+        "job_id": job.job_id if job else "scan-all-authors",
+        "status": "queued" if job else "already_queued",
+    }
 
 
 @router.get("/job/{job_id}", summary="Check job status")
