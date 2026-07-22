@@ -122,6 +122,19 @@ async def scan_all_library_paths_task(ctx: dict) -> dict[str, Any]:
     return {"paths_scanned": len(results), "results": results, "errors": errors}
 
 
+async def request_downloads_task(ctx: dict, book_ids: list[int]) -> dict[str, Any]:
+    """arq task: user-triggered batch search — best match per book, queued as
+    pending download attempts for approval (Series page "search all missing")."""
+    from core.auto_download import request_downloads_for_books
+
+    config = get_config()
+    redis_client = ctx.get("redis")
+    async with AsyncSessionFactory() as session:
+        return await request_downloads_for_books(
+            session, book_ids, config, redis_client=redis_client
+        )
+
+
 async def poll_completed_downloads_task(ctx: dict) -> dict[str, Any]:
     """arq cron task: import completed qBittorrent downloads automatically.
 

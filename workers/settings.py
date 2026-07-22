@@ -15,6 +15,7 @@ from arq.connections import RedisSettings
 from workers.tasks import (
     import_download_task,
     poll_completed_downloads_task,
+    request_downloads_task,
     scan_all_authors_task,
     scan_all_library_paths_task,
     scan_author_task,
@@ -162,6 +163,7 @@ class WorkerSettings:
         scan_all_library_paths_task,
         import_download_task,
         poll_completed_downloads_task,
+        request_downloads_task,
     ]
     cron_jobs = _build_cron_jobs()
     redis_settings = _redis_settings()

@@ -165,77 +165,159 @@ async def run_auto_download_for_author(
     if not candidates:
         return {"enabled": True, "candidates": 0, "sent": 0, "pending": 0}
 
-    prowlarr = getattr(config, "prowlarr", None)
-    jackett = getattr(config, "jackett", None)
-
     sent = 0
     pending = 0
     async with httpx.AsyncClient() as client:
         for book in candidates:
-            query = f"{book.title} {author.name}".strip()
-            try:
-                results = await unified_search(
-                    client,
-                    query,
-                    prowlarr_url=getattr(prowlarr, "url", "") if prowlarr else "",
-                    prowlarr_key=getattr(prowlarr, "api_key", "") if prowlarr else "",
-                    jackett_url=getattr(jackett, "url", "") if jackett else "",
-                    jackett_key=getattr(jackett, "api_key", "") if jackett else "",
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Auto-download search failed",
-                    extra={"book_id": book.id, "error": str(exc)},
-                )
-                continue
-
-            best = select_best_result(results, prefs)
-            if best is None:
-                continue
-
-            url = best.get("download_url") or best.get("url") or ""
-            release_type = best.get("type", "torrent")
-            attempt = DownloadAttempt(
-                book_id=book.id,
-                book_title=book.title,
-                query=query,
-                release_title=best.get("title", ""),
-                indexer=best.get("indexer"),
-                source=best.get("source"),
-                type=release_type,
-                size_bytes=best.get("size"),
-                seeders=best.get("seeders"),
-                download_url=url,
+            outcome = await _search_and_record(
+                session, client, config, prefs, book, author.name, author_id,
+                mode=mode, redis_client=redis_client,
             )
-
-            if mode == "auto":
-                result = await send_release(
-                    client, config, url=url, title=best.get("title", ""),
-                    release_type=release_type, book_id=book.id,
-                )
-                ok = bool(result.get("success"))
-                attempt.status = "queued" if ok else "failed"
-                attempt.error_detail = None if ok else result.get("detail")
-                if ok:
-                    sent += 1
-                event = "autodownload.sent" if ok else "autodownload.failed"
-            else:
-                attempt.status = "pending"
+            if outcome == "sent":
+                sent += 1
+            elif outcome == "pending":
                 pending += 1
-                event = "autodownload.pending"
-
-            session.add(attempt)
-            await session.commit()
-            await _publish(redis_client, {
-                "event": event,
-                "book_id": book.id,
-                "book_title": book.title,
-                "author_id": author_id,
-                "author_name": author.name,
-                "release_title": best.get("title", ""),
-            })
 
     return {"enabled": True, "candidates": len(candidates), "sent": sent, "pending": pending}
+
+
+async def _search_and_record(
+    session: AsyncSession,
+    client: httpx.AsyncClient,
+    config: Any,
+    prefs: dict[str, Any],
+    book: Book,
+    author_name: str,
+    author_id: int | None,
+    *,
+    mode: str,
+    redis_client: Any = None,
+) -> str:
+    """Search the indexers for one book, pick the best match, and either send
+    it or record it as pending.  Returns "sent" | "pending" | "failed" | "none".
+    """
+    prowlarr = getattr(config, "prowlarr", None)
+    jackett = getattr(config, "jackett", None)
+    query = f"{book.title} {author_name}".strip()
+    try:
+        results = await unified_search(
+            client,
+            query,
+            prowlarr_url=getattr(prowlarr, "url", "") if prowlarr else "",
+            prowlarr_key=getattr(prowlarr, "api_key", "") if prowlarr else "",
+            jackett_url=getattr(jackett, "url", "") if jackett else "",
+            jackett_key=getattr(jackett, "api_key", "") if jackett else "",
+        )
+    except Exception as exc:
+        logger.warning(
+            "Auto-download search failed",
+            extra={"book_id": book.id, "error": str(exc)},
+        )
+        return "none"
+
+    best = select_best_result(results, prefs)
+    if best is None:
+        return "none"
+
+    url = best.get("download_url") or best.get("url") or ""
+    release_type = best.get("type", "torrent")
+    attempt = DownloadAttempt(
+        book_id=book.id,
+        book_title=book.title,
+        query=query,
+        release_title=best.get("title", ""),
+        indexer=best.get("indexer"),
+        source=best.get("source"),
+        type=release_type,
+        size_bytes=best.get("size"),
+        seeders=best.get("seeders"),
+        download_url=url,
+    )
+
+    if mode == "auto":
+        result = await send_release(
+            client, config, url=url, title=best.get("title", ""),
+            release_type=release_type, book_id=book.id,
+        )
+        ok = bool(result.get("success"))
+        attempt.status = "queued" if ok else "failed"
+        attempt.error_detail = None if ok else result.get("detail")
+        event = "autodownload.sent" if ok else "autodownload.failed"
+        outcome = "sent" if ok else "failed"
+    else:
+        attempt.status = "pending"
+        event = "autodownload.pending"
+        outcome = "pending"
+
+    session.add(attempt)
+    await session.commit()
+    await _publish(redis_client, {
+        "event": event,
+        "book_id": book.id,
+        "book_title": book.title,
+        "author_id": author_id,
+        "author_name": author_name,
+        "release_title": best.get("title", ""),
+    })
+    return outcome
+
+
+async def request_downloads_for_books(
+    session: AsyncSession,
+    book_ids: list[int],
+    config: Any,
+    redis_client: Any = None,
+) -> dict[str, Any]:
+    """User-triggered batch: find the best indexer match for each book and
+    queue it as a *pending* download attempt for approval.
+
+    Used by "search all missing" on the Series page.  Unlike the post-scan
+    auto-download pass this ignores watchlist.auto_download (the user asked
+    explicitly), but it still skips unreleased books and books that already
+    have a queued/pending attempt.
+    """
+    q = await session.execute(select(Book).where(Book.id.in_(book_ids)))
+    books = list(q.scalars().all())
+
+    today = datetime.now(timezone.utc).date()
+    eligible = [
+        b for b in books
+        if not b.have_it and not b.deleted and b.canonical_book_id is None
+        and (parse_release_date(b.release_date) or today) <= today
+    ]
+    blocked = await _blocked_book_ids(session, [b.id for b in eligible])
+    candidates = [b for b in eligible if b.id not in blocked]
+
+    prefs = await _load_download_prefs(session)
+
+    # Resolve author names for search queries in one query.
+    author_ids = {b.primary_author_id for b in candidates if b.primary_author_id}
+    names: dict[int, str] = {}
+    if author_ids:
+        aq = await session.execute(select(Author.id, Author.name).where(Author.id.in_(author_ids)))
+        names = dict(aq.all())
+
+    queued = 0
+    no_match: list[str] = []
+    async with httpx.AsyncClient() as client:
+        for book in candidates:
+            author_name = names.get(book.primary_author_id or 0, "")
+            outcome = await _search_and_record(
+                session, client, config, prefs, book, author_name,
+                book.primary_author_id, mode="approval", redis_client=redis_client,
+            )
+            if outcome == "pending":
+                queued += 1
+            else:
+                no_match.append(book.title)
+
+    return {
+        "requested": len(book_ids),
+        "candidates": len(candidates),
+        "skipped": len(book_ids) - len(candidates),
+        "queued": queued,
+        "no_match": no_match,
+    }
 
 
 async def _load_download_prefs(session: AsyncSession) -> dict[str, Any]:

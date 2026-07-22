@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -80,6 +80,36 @@ async def create_attempt(
     await session.commit()
     await session.refresh(attempt)
     return attempt
+
+
+class RequestDownloadsBody(BaseModel):
+    book_ids: list[int]
+
+
+@router.post("/request", summary="Batch-search books and queue best matches for approval")
+async def request_downloads(
+    body: RequestDownloadsBody,
+    request: Request,
+) -> dict:
+    """Enqueue a worker job that searches the indexers for each book and
+    records the best match as a *pending* download attempt.
+
+    Used by the Series page "search all missing" — results appear under
+    Downloads → Pending approval (and emit ``autodownload.pending`` events).
+    Unreleased books and books with an existing queued/pending attempt are
+    skipped.
+    """
+    if not body.book_ids:
+        raise HTTPException(status_code=422, detail="book_ids must not be empty")
+    if len(body.book_ids) > 100:
+        raise HTTPException(status_code=422, detail="Too many books in one request (max 100)")
+
+    pool = getattr(request.app.state, "arq_pool", None)
+    if pool is None:
+        raise HTTPException(status_code=503, detail="Job queue unavailable")
+
+    job = await pool.enqueue_job("request_downloads_task", body.book_ids)
+    return {"job_id": job.job_id, "requested": len(body.book_ids), "status": "queued"}
 
 
 @router.post(
