@@ -71,6 +71,9 @@ _DEFAULT: dict = {
         # a qBittorrent download client is configured.
         "auto_import": True,
         "auto_import_interval_minutes": 2,
+        # Rename imported audio files to "<Title> - Part NN.ext" instead of
+        # keeping the release's original filenames.
+        "rename_files": True,
     },
 }
 
@@ -141,6 +144,8 @@ def _apply_env_overrides(data: dict) -> dict:
         data["postprocess"]["mode"] = v
     if v := env.get("POSTPROCESS_LIBRARY_ROOT"):
         data["postprocess"]["library_root"] = v
+    if v := env.get("POSTPROCESS_RENAME_FILES"):
+        data["postprocess"]["rename_files"] = v.strip().lower() in ("1", "true", "yes", "on")
     if v := env.get("SCAN_CACHE_TTL_HOURS"):
         data["scan"]["cache_ttl_hours"] = int(v)
     if v := env.get("SCAN_LANGUAGE_FILTER"):

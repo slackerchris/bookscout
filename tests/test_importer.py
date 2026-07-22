@@ -140,11 +140,43 @@ class TestImportDownload:
         result = import_download(src, lib, "J.N. Chaney", "Renegade Star #1",
                                  series="Renegade Star")
         assert result["errors"] == []
-        assert len(result["files_copied"]) == 2
+        # Default: files are renamed to clean "<Title> - Part NN" names
+        assert result["files_copied"] == [
+            "Renegade Star #1 - Part 01.m4b",
+            "Renegade Star #1 - Part 02.m4b",
+        ]
         assert result["extracted"] is False
         dest = Path(result["destination"])
         assert dest.exists()
-        assert (dest / "chapter1.m4b").exists()
+        assert (dest / "Renegade Star #1 - Part 01.m4b").exists()
+
+    def test_rename_disabled_keeps_original_names(self, tmp_path):
+        src = tmp_path / "download"
+        src.mkdir()
+        (src / "chapter1.m4b").write_bytes(b"audio")
+        (src / "chapter2.m4b").write_bytes(b"audio")
+        lib = tmp_path / "library"
+
+        result = import_download(src, lib, "J.N. Chaney", "Renegade Star #1",
+                                 series="Renegade Star", rename_files=False)
+        assert sorted(result["files_copied"]) == ["chapter1.m4b", "chapter2.m4b"]
+
+    def test_rename_orders_naturally(self, tmp_path):
+        src = tmp_path / "download"
+        src.mkdir()
+        for name in ("Track 10.mp3", "Track 2.mp3", "Track 1.mp3"):
+            (src / name).write_bytes(b"audio")
+        lib = tmp_path / "library"
+
+        result = import_download(src, lib, "Author", "My Book")
+        # Track 2 must order before Track 10 (natural sort, not lexicographic)
+        assert result["files_copied"] == [
+            "My Book - Part 01.mp3",
+            "My Book - Part 02.mp3",
+            "My Book - Part 03.mp3",
+        ]
+        dest = Path(result["destination"])
+        assert (dest / "My Book - Part 02.mp3").read_bytes() == b"audio"
 
     def test_zip_archive_extracted_and_moved(self, tmp_path):
         zip_path = tmp_path / "book.zip"
@@ -155,7 +187,8 @@ class TestImportDownload:
         result = import_download(zip_path, lib, "Frank Herbert", "Dune")
         assert result["errors"] == []
         assert result["extracted"] is True
-        assert "audio.mp3" in result["files_copied"]
+        # Single audio file is renamed to just the book title
+        assert result["files_copied"] == ["Dune.mp3"]
 
     def test_missing_source_returns_error(self, tmp_path):
         result = import_download(

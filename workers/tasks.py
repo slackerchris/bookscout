@@ -234,6 +234,7 @@ async def import_download_task(
     config = get_config()
     pp = getattr(config, "postprocess", None)
     library_root = getattr(pp, "library_root", "") if pp else ""
+    rename_files = bool(getattr(pp, "rename_files", True)) if pp else True
     if not library_root:
         return {"success": False, "detail": "postprocess.library_root not configured"}
 
@@ -263,6 +264,7 @@ async def import_download_task(
             author=author_name,
             title=title,
             series=series,
+            rename_files=rename_files,
         ),
     )
 

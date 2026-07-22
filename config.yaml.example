@@ -63,3 +63,6 @@ postprocess:
   # Only active when mode = bookscout and download.torrent is qBittorrent.
   auto_import: true
   auto_import_interval_minutes: 2
+  # Rename imported audio files to "<Title> - Part NN.ext" (single files
+  # become "<Title>.ext") instead of keeping release filenames.
+  rename_files: true

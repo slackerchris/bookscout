@@ -1,5 +1,10 @@
 # BookScout Changelog
 
+## [0.72.0] - 2026-07-22
+
+### Added
+- **Clean file names on import** — imported audio files are renamed to `<Title>.ext` (single file) or `<Title> - Part NN.ext` (multi-file, natural sort so Track 2 orders before Track 10) instead of keeping the release's scene-style filenames. The destination folder was already `<Author>/<Series>/<Title>/`; now the contents match. Opt out with `postprocess.rename_files: false` / `POSTPROCESS_RENAME_FILES=false`.
+
 ## [0.71.0] - 2026-07-22
 
 ### Added

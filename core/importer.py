@@ -145,12 +145,19 @@ def _collect_archives(root: Path) -> list[Path]:
 # Main entry point
 # ---------------------------------------------------------------------------
 
+def _natural_key(path: Path) -> tuple:
+    """Sort key with numeric awareness so 'Track 2' orders before 'Track 10'."""
+    parts = re.split(r"(\d+)", str(path).lower())
+    return tuple(int(part) if part.isdigit() else part for part in parts)
+
+
 def import_download(
     source: str | Path,
     library_root: str | Path,
     author: str,
     title: str,
     series: str | None = None,
+    rename_files: bool = True,
 ) -> dict[str, Any]:
     """Extract (if needed) and organise an audiobook download.
 
@@ -260,14 +267,33 @@ def import_download(
     files_copied: list[str] = []
     skipped: list[str] = []
 
-    # The destination is flat, so same-named files from different source dirs
-    # (multi-disc layouts) are disambiguated with their parent directory name.
-    name_counts = Counter(af.name for af in unique_audio)
+    if rename_files:
+        # Clean library names: "<Title>.ext" for a single file,
+        # "<Title> - Part NN.ext" for multi-file books, ordered naturally
+        # (Track 2 before Track 10, CD1 before CD2).
+        ordered = sorted(unique_audio, key=_natural_key)
+        safe_title = _sanitise(title)
+        width = max(2, len(str(len(ordered))))
+        if len(ordered) == 1:
+            plan = [(ordered[0], f"{safe_title}{ordered[0].suffix.lower()}")]
+        else:
+            plan = [
+                (af, f"{safe_title} - Part {idx:0{width}d}{af.suffix.lower()}")
+                for idx, af in enumerate(ordered, 1)
+            ]
+    else:
+        # Keep original release filenames; same-named files from different
+        # source dirs (multi-disc layouts) get a parent-dir prefix.
+        name_counts = Counter(af.name for af in unique_audio)
+        plan = [
+            (
+                af,
+                af.name if name_counts[af.name] == 1 else f"{af.parent.name} - {af.name}",
+            )
+            for af in unique_audio
+        ]
 
-    for af in unique_audio:
-        target_name = (
-            af.name if name_counts[af.name] == 1 else f"{af.parent.name} - {af.name}"
-        )
+    for af, target_name in plan:
         target = dest / target_name
         if target.exists():
             skipped.append(target_name)
