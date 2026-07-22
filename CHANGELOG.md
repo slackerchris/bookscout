@@ -1,5 +1,10 @@
 # BookScout Changelog
 
+## [0.71.0] - 2026-07-22
+
+### Added
+- **Retry failed downloads** — `POST /download-history/{id}/approve` now also accepts attempts with status `failed`, re-sending the stored release to the download client. Explicit user requests (`/download-history/request`, the Series "Search all missing") now bypass the 24 h failure cooldown — only in-flight (queued/pending) attempts block them. The automatic post-scan pass keeps the cooldown so a broken release isn't retried every hourly scan.
+
 ## [0.70.2] - 2026-07-22
 
 ### Fixed

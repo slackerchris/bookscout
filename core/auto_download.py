@@ -125,16 +125,24 @@ async def _eligible_books(session: AsyncSession, author_id: int) -> list[Book]:
     ]
 
 
-async def _blocked_book_ids(session: AsyncSession, book_ids: list[int]) -> set[int]:
-    """Books with a queued/pending attempt, or any attempt in the cooldown window."""
+async def _blocked_book_ids(
+    session: AsyncSession, book_ids: list[int], *, respect_cooldown: bool = True
+) -> set[int]:
+    """Books with a queued/pending attempt — and, for the automatic post-scan
+    pass (``respect_cooldown=True``), any attempt in the cooldown window so a
+    failing release isn't retried on every hourly scan.  Explicit user
+    requests bypass the cooldown: only in-flight attempts block them.
+    """
     if not book_ids:
         return set()
-    cutoff = datetime.now(timezone.utc) - _RETRY_COOLDOWN
+    condition = DownloadAttempt.status.in_(_BLOCKING_STATUSES)
+    if respect_cooldown:
+        cutoff = datetime.now(timezone.utc) - _RETRY_COOLDOWN
+        condition = condition | (DownloadAttempt.created_at >= cutoff)
     q = await session.execute(
         select(DownloadAttempt.book_id).where(
             DownloadAttempt.book_id.in_(book_ids),
-            (DownloadAttempt.status.in_(_BLOCKING_STATUSES))
-            | (DownloadAttempt.created_at >= cutoff),
+            condition,
         )
     )
     return {row[0] for row in q.all()}
@@ -285,7 +293,11 @@ async def request_downloads_for_books(
         if not b.have_it and not b.deleted and b.canonical_book_id is None
         and (parse_release_date(b.release_date) or today) <= today
     ]
-    blocked = await _blocked_book_ids(session, [b.id for b in eligible])
+    # User-triggered: bypass the failure cooldown — an explicit click may
+    # always retry.  Only in-flight (queued/pending) attempts block.
+    blocked = await _blocked_book_ids(
+        session, [b.id for b in eligible], respect_cooldown=False
+    )
     candidates = [b for b in eligible if b.id not in blocked]
 
     prefs = await _load_download_prefs(session)

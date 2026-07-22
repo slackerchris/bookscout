@@ -115,7 +115,7 @@ async def request_downloads(
 @router.post(
     "/{attempt_id}/approve",
     response_model=DownloadAttemptOut,
-    summary="Approve a pending auto-download and send it to the client",
+    summary="Approve a pending auto-download (or retry a failed one) — sends it to the client",
 )
 async def approve_attempt(
     attempt_id: int,
@@ -128,8 +128,11 @@ async def approve_attempt(
     attempt = await session.get(DownloadAttempt, attempt_id)
     if attempt is None:
         raise HTTPException(status_code=404, detail="Download attempt not found")
-    if attempt.status != "pending":
-        raise HTTPException(status_code=409, detail=f"Attempt is '{attempt.status}', not pending")
+    # "failed" is retryable — an explicit user action always may re-send.
+    if attempt.status not in ("pending", "failed"):
+        raise HTTPException(
+            status_code=409, detail=f"Attempt is '{attempt.status}' — only pending/failed can be sent"
+        )
     if not attempt.download_url:
         raise HTTPException(status_code=422, detail="Attempt has no download URL")
 
