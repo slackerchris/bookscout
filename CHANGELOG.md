@@ -1,5 +1,10 @@
 # BookScout Changelog
 
+## [0.76.0] - 2026-07-22
+
+### Added
+- **Indexer-politeness dials** (download preferences, with Settings UI): `search_cooldown_hours` (default 6 — an unfound book is re-searched at most this often; "no match" outcomes are now recorded as hidden `nomatch` markers so the cooldown has memory), `search_delay_seconds` (default 3 — pause between consecutive indexer queries in one pass), and `max_searches_per_run` (default 5 — the automatic pass searches at most this many books per scan; the rest wait for the next pass). Explicit user requests still bypass the cooldown. `nomatch` markers are hidden from the history listing unless requested with `?status=nomatch`.
+
 ## [0.75.0] - 2026-07-22
 
 ### Added

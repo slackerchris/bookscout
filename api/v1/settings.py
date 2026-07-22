@@ -35,6 +35,13 @@ class DownloadPreferences(BaseModel):
     # win when nothing better exists.
     preferred_indexers: str = ""
     fallback_indexers: str = ""
+    # Indexer-politeness dials for automatic searching:
+    # re-search an unfound book at most every N hours…
+    search_cooldown_hours: int = 6
+    # …wait this long between consecutive searches in one pass…
+    search_delay_seconds: float = 3
+    # …and search at most this many books per automatic pass.
+    max_searches_per_run: int = 5
 
 
 class DownloadPreferencesUpdate(BaseModel):
@@ -46,6 +53,9 @@ class DownloadPreferencesUpdate(BaseModel):
     auto_download_mode: str | None = None
     preferred_indexers: str | None = None
     fallback_indexers: str | None = None
+    search_cooldown_hours: int | None = None
+    search_delay_seconds: float | None = None
+    max_searches_per_run: int | None = None
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ every hourly scan).
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -243,26 +244,45 @@ async def _eligible_books(session: AsyncSession, author_id: int) -> list[Book]:
 
 
 async def _blocked_book_ids(
-    session: AsyncSession, book_ids: list[int], *, respect_cooldown: bool = True
+    session: AsyncSession,
+    book_ids: list[int],
+    *,
+    respect_cooldown: bool = True,
+    nomatch_cooldown_hours: float = 6,
 ) -> set[int]:
-    """Books with a queued/pending attempt — and, for the automatic post-scan
-    pass (``respect_cooldown=True``), any attempt in the cooldown window so a
-    failing release isn't retried on every hourly scan.  Explicit user
-    requests bypass the cooldown: only in-flight attempts block them.
+    """Books that the automatic pass should not search right now.
+
+    - queued/pending attempts always block (a grab is already in flight)
+    - with ``respect_cooldown`` (the automatic post-scan pass):
+      failed/dismissed attempts block for 24 h, and "nomatch" markers
+      (searched, found nothing) block for ``nomatch_cooldown_hours`` — so an
+      unfound release isn't re-searched on every hourly scan.
+    Explicit user requests bypass the cooldowns entirely.
     """
     if not book_ids:
         return set()
-    condition = DownloadAttempt.status.in_(_BLOCKING_STATUSES)
-    if respect_cooldown:
-        cutoff = datetime.now(timezone.utc) - _RETRY_COOLDOWN
-        condition = condition | (DownloadAttempt.created_at >= cutoff)
     q = await session.execute(
-        select(DownloadAttempt.book_id).where(
-            DownloadAttempt.book_id.in_(book_ids),
-            condition,
-        )
+        select(
+            DownloadAttempt.book_id,
+            DownloadAttempt.status,
+            DownloadAttempt.created_at,
+        ).where(DownloadAttempt.book_id.in_(book_ids))
     )
-    return {row[0] for row in q.all()}
+    now = datetime.now(timezone.utc)
+    blocked: set[int] = set()
+    for book_id, status, created_at in q.all():
+        if status in _BLOCKING_STATUSES:
+            blocked.add(book_id)
+        elif respect_cooldown and created_at is not None:
+            if created_at.tzinfo is None:  # SQLite returns naive timestamps
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            age = now - created_at
+            if status == "nomatch":
+                if age < timedelta(hours=nomatch_cooldown_hours):
+                    blocked.add(book_id)
+            elif age < _RETRY_COOLDOWN:
+                blocked.add(book_id)
+    return blocked
 
 
 async def run_auto_download_for_author(
@@ -284,16 +304,25 @@ async def run_auto_download_for_author(
     prefs = await _load_download_prefs(session)
     mode = str(prefs.get("auto_download_mode") or "approval")
 
+    cooldown_hours = float(prefs.get("search_cooldown_hours") or 6)
+    delay_seconds = max(0.0, float(prefs.get("search_delay_seconds") or 3))
+    max_searches = max(1, int(prefs.get("max_searches_per_run") or 5))
+
     books = await _eligible_books(session, author_id)
-    blocked = await _blocked_book_ids(session, [b.id for b in books])
+    blocked = await _blocked_book_ids(
+        session, [b.id for b in books], nomatch_cooldown_hours=cooldown_hours
+    )
     candidates = [b for b in books if b.id not in blocked]
     if not candidates:
         return {"enabled": True, "candidates": 0, "sent": 0, "pending": 0}
 
+    capped = candidates[:max_searches]
     sent = 0
     pending = 0
     async with httpx.AsyncClient() as client:
-        for book in candidates:
+        for idx, book in enumerate(capped):
+            if idx:
+                await asyncio.sleep(delay_seconds)
             outcome = await _search_and_record(
                 session, client, config, prefs, book, author.name, author_id,
                 mode=mode, redis_client=redis_client,
@@ -303,7 +332,14 @@ async def run_auto_download_for_author(
             elif outcome == "pending":
                 pending += 1
 
-    return {"enabled": True, "candidates": len(candidates), "sent": sent, "pending": pending}
+    return {
+        "enabled": True,
+        "candidates": len(candidates),
+        "searched": len(capped),
+        "deferred": len(candidates) - len(capped),
+        "sent": sent,
+        "pending": pending,
+    }
 
 
 async def _search_and_record(
@@ -347,6 +383,17 @@ async def _search_and_record(
         narrator=book.narrator or "",
     )
     if best is None:
+        # Remember the empty result so the automatic pass doesn't re-search
+        # this book on every scan (see search_cooldown_hours).  Hidden from
+        # the default history listing.
+        session.add(DownloadAttempt(
+            book_id=book.id,
+            book_title=book.title,
+            query=query,
+            release_title="(no match)",
+            status="nomatch",
+        ))
+        await session.commit()
         return "none"
 
     url = best.get("download_url") or best.get("url") or ""
@@ -431,10 +478,13 @@ async def request_downloads_for_books(
         aq = await session.execute(select(Author.id, Author.name).where(Author.id.in_(author_ids)))
         names = dict(aq.all())
 
+    delay_seconds = max(0.0, float(prefs.get("search_delay_seconds") or 3))
     queued = 0
     no_match: list[str] = []
     async with httpx.AsyncClient() as client:
-        for book in candidates:
+        for idx, book in enumerate(candidates):
+            if idx:
+                await asyncio.sleep(delay_seconds)
             author_name = names.get(book.primary_author_id or 0, "")
             outcome = await _search_and_record(
                 session, client, config, prefs, book, author_name,

@@ -66,6 +66,10 @@ async def list_history(
     q = select(DownloadAttempt).order_by(DownloadAttempt.created_at.desc()).limit(limit)
     if status:
         q = q.where(DownloadAttempt.status == status)
+    else:
+        # "nomatch" rows are internal search-cooldown markers — hidden unless
+        # explicitly requested with ?status=nomatch.
+        q = q.where(DownloadAttempt.status != "nomatch")
     result = await session.execute(q)
     return list(result.scalars().all())
 

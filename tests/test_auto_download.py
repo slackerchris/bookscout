@@ -163,3 +163,42 @@ def test_fallback_indexer_still_wins_when_alone():
     prefs = {"fallback_indexers": "jackett"}
     only = _result(title="Titan War [MP3]", seeders=1, indexer="Jackett")
     assert select_best_result([only], prefs) == only
+
+
+# ── search-politeness dials ─────────────────────────────────────────────────
+
+import pytest as _pytest
+
+
+@_pytest.mark.asyncio
+async def test_nomatch_marker_blocks_within_cooldown(session):
+    from datetime import datetime, timedelta, timezone
+    from core.auto_download import _blocked_book_ids
+    from db.models import Author, Book, DownloadAttempt
+
+    author = Author(name="A", name_sort="A", name_normalized="a")
+    session.add(author)
+    await session.flush()
+    book = Book(title="T", title_sort="T", score=0, confidence_band="high",
+                match_method="api", primary_author_id=author.id)
+    session.add(book)
+    await session.flush()
+
+    session.add(DownloadAttempt(book_id=book.id, release_title="(no match)", status="nomatch"))
+    await session.flush()
+
+    # Fresh nomatch blocks the automatic pass…
+    blocked = await _blocked_book_ids(session, [book.id], nomatch_cooldown_hours=6)
+    assert book.id in blocked
+    # …but not an explicit user request…
+    blocked = await _blocked_book_ids(session, [book.id], respect_cooldown=False)
+    assert book.id not in blocked
+    # …and expires after the cooldown window.
+    q = await session.execute(
+        __import__("sqlalchemy").select(DownloadAttempt).where(DownloadAttempt.book_id == book.id)
+    )
+    attempt = q.scalars().first()
+    attempt.created_at = datetime.now(timezone.utc) - timedelta(hours=7)
+    await session.flush()
+    blocked = await _blocked_book_ids(session, [book.id], nomatch_cooldown_hours=6)
+    assert book.id not in blocked
