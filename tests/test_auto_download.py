@@ -92,3 +92,40 @@ def test_preferred_format_is_soft():
 
 def test_requires_a_download_url():
     assert select_best_result([_result(download_url="", url="")], {}) is None
+
+
+# ── quality ranking ─────────────────────────────────────────────────────────
+
+def test_quality_beats_raw_seeders():
+    m4b = _result(title="Titan War - B.V. Larson [M4B] [128 Kbps]", seeders=2)
+    mp3 = _result(title="Titan War - B.V. Larson [MP3] [32 Kbps]", seeders=5)
+    assert select_best_result([mp3, m4b], {}) == m4b
+
+
+def test_higher_bitrate_wins_within_format():
+    hi = _result(title="Titan War [MP3] [128 Kbps]", seeders=3)
+    lo = _result(title="Titan War [MP3] [32 Kbps]", seeders=3)
+    assert select_best_result([lo, hi], {}) == hi
+
+
+def test_wrong_book_is_discarded_when_title_known():
+    wrong = _result(title="Completely Different Novel [M4B]", seeders=50)
+    right = _result(title="Titan War - B.V. Larson [MP3]", seeders=1)
+    best = select_best_result([wrong, right], {}, book_title="Titan War", author_name="B.V. Larson")
+    assert best == right
+
+
+def test_require_unabridged_excludes_abridged():
+    abridged = _result(title="Titan War (Abridged) [M4B]", seeders=10)
+    full = _result(title="Titan War (Unabridged) [MP3]", seeders=1)
+    prefs = {"require_unabridged": True}
+    assert select_best_result([abridged, full], prefs) == full
+    # Without the flag, abridged still ranks below via the score penalty
+    assert select_best_result([abridged, full], {}) == full
+
+
+def test_nzb_gets_availability_credit():
+    nzb = _result(title="Titan War [M4B]", type="nzb", seeders=0)
+    torrent = _result(title="Titan War [M4B]", seeders=1)
+    # NZB flat credit (+10) beats a 1-seeder torrent of equal quality
+    assert select_best_result([torrent, nzb], {}) == nzb

@@ -1,5 +1,10 @@
 # BookScout Changelog
 
+## [0.73.0] - 2026-07-22
+
+### Added
+- **Quality ranking for auto-download / batch requests** — best-match selection now scores every viable result instead of taking the most-seeded one: audiobook format (M4B > FLAC > MP3), stated bitrate, unabridged marker, preferred-format bonus, and relevance overlap with the book title and author. Seeders still count but are capped so a big swarm on a worse release can't outrank a better one, and NZB results get a flat availability credit instead of always sorting last. Two new guards: results that don't plausibly match the book title are discarded outright, and `require_unabridged` (existing preference, previously unused by selection) now excludes abridged releases.
+
 ## [0.72.0] - 2026-07-22
 
 ### Added

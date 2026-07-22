@@ -61,18 +61,98 @@ def book_is_eligible(book: Book, today: date) -> bool:
     return released is not None and released <= today
 
 
+_BITRATE_RE = re.compile(r"\b(\d{2,3})\s?k(?:bps)?\b", re.IGNORECASE)
+_WORD_RE = re.compile(r"[a-z0-9]+")
+_STOPWORDS = frozenset({"the", "a", "an", "of", "and", "in", "book", "vol", "volume"})
+
+
+def _title_words(text: str) -> set[str]:
+    return {w for w in _WORD_RE.findall(text.lower()) if w not in _STOPWORDS}
+
+
+def score_result(
+    r: dict[str, Any],
+    prefs: dict[str, Any],
+    book_title: str = "",
+    author_name: str = "",
+) -> float:
+    """Quality score for one indexer result — higher is better.
+
+    Signals: audiobook format (m4b > flac > mp3), stated bitrate, unabridged
+    marker, seeders (capped so swarm size can't outvote quality), and overlap
+    between the release title and the book/author being sought.
+    """
+    title = str(r.get("title", "")).lower()
+    score = 0.0
+
+    # Format quality
+    if "m4b" in title or "m4a" in title:
+        score += 30
+    elif "flac" in title:
+        score += 18
+    elif "mp3" in title:
+        score += 10
+    preferred_format = str(prefs.get("preferred_format") or "").lower()
+    if preferred_format and preferred_format in title:
+        score += 25
+
+    # Stated bitrate
+    m = _BITRATE_RE.search(title)
+    if m:
+        kbps = int(m.group(1))
+        if kbps >= 128:
+            score += 15
+        elif kbps >= 64:
+            score += 8
+        else:
+            score -= 5
+
+    # Abridgement
+    if "unabridged" in title:
+        score += 10
+    elif "abridged" in title:
+        score -= 40
+
+    # Availability: seeders capped at 30 so a huge swarm on a worse release
+    # can't outrank a better one; NZBs get a flat availability credit so
+    # zero-seeder Usenet results aren't automatically last.
+    if r.get("type") == "nzb":
+        score += 10
+    else:
+        score += min(int(r.get("seeders") or 0), 30)
+
+    # Relevance to the book being sought
+    if book_title:
+        wanted = _title_words(book_title)
+        if wanted:
+            overlap = len(wanted & _title_words(title)) / len(wanted)
+            score += 40 * overlap
+    if author_name:
+        surname = author_name.split()[-1].lower() if author_name.split() else ""
+        if surname and surname in title:
+            score += 8
+
+    return score
+
+
 def select_best_result(
-    results: list[dict[str, Any]], prefs: dict[str, Any]
+    results: list[dict[str, Any]],
+    prefs: dict[str, Any],
+    book_title: str = "",
+    author_name: str = "",
 ) -> dict[str, Any] | None:
     """Pick the best indexer result under the user's download preferences.
 
-    Hard filters: min_seeders (torrents only) and max_size_gb.  The preferred
-    format is a soft filter — applied only when at least one result matches,
-    so a lone mp3 release still gets picked when you prefer m4b.
+    Hard filters: min_seeders (torrents only), max_size_gb, a usable URL,
+    and — when *book_title* is provided — a minimum title-word overlap so a
+    wrong-book release can't win on quality alone.  ``require_unabridged``
+    excludes releases marked abridged.  Survivors are ranked by
+    ``score_result`` (quality + relevance), seeders as the tie-break.
     """
     min_seeders = int(prefs.get("min_seeders") or 0)
     max_size_gb = float(prefs.get("max_size_gb") or 0)
-    preferred_format = str(prefs.get("preferred_format") or "").lower()
+    require_unabridged = bool(prefs.get("require_unabridged"))
+    wanted = _title_words(book_title) if book_title else set()
 
     viable = []
     for r in results:
@@ -84,18 +164,25 @@ def select_best_result(
             continue
         if not r.get("download_url") and not r.get("url"):
             continue
+        title = str(r.get("title", "")).lower()
+        if require_unabridged and "abridged" in title and "unabridged" not in title:
+            continue
+        if wanted:
+            overlap = len(wanted & _title_words(title)) / len(wanted)
+            if overlap < 0.4:
+                continue  # doesn't look like the right book
         viable.append(r)
 
     if not viable:
         return None
 
-    if preferred_format:
-        matching = [r for r in viable if preferred_format in str(r.get("title", "")).lower()]
-        if matching:
-            viable = matching
-
-    # unified_search already sorts by (seeders, size) desc; keep that order.
-    return viable[0]
+    return max(
+        viable,
+        key=lambda r: (
+            score_result(r, prefs, book_title, author_name),
+            int(r.get("seeders") or 0),
+        ),
+    )
 
 
 async def _eligible_books(session: AsyncSession, author_id: int) -> list[Book]:
@@ -223,7 +310,7 @@ async def _search_and_record(
         )
         return "none"
 
-    best = select_best_result(results, prefs)
+    best = select_best_result(results, prefs, book_title=book.title, author_name=author_name)
     if best is None:
         return "none"
 
