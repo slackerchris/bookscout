@@ -18,6 +18,7 @@ workflow file.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any
@@ -29,6 +30,36 @@ logger = logging.getLogger(__name__)
 _BOOK_TAG_RE = re.compile(r"^bookscout-(\d+)$")
 TAG_IMPORTED = "bs-imported"
 TAG_FAILED = "bs-failed"
+
+
+def add_ok(status_code: int, text: str) -> bool:
+    """True when a qBittorrent ``torrents/add`` response indicates the torrent
+    was accepted.
+
+    Older WebAPI versions answer ``200 Ok.`` (or ``Fails.``).  qBittorrent
+    5.1+ returns a JSON summary like ``{"added_torrent_ids": [],
+    "success_count": 0, "pending_count": 1, "failure_count": 0}`` — adds by
+    URL are fetched asynchronously and count as *pending*, which is success.
+    """
+    if not 200 <= status_code < 300:
+        return False
+    body = text.strip()
+    if body in ("", "Ok."):
+        return True
+    if body == "Fails.":
+        return False
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return False
+    if not isinstance(data, dict):
+        return False
+    accepted = (
+        len(data.get("added_torrent_ids") or [])
+        + int(data.get("success_count") or 0)
+        + int(data.get("pending_count") or 0)
+    )
+    return accepted > 0 and int(data.get("failure_count") or 0) == 0
 
 
 def login_ok(status_code: int, text: str) -> bool:

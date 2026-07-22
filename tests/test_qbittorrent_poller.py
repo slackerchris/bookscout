@@ -65,3 +65,18 @@ def test_login_ok_accepts_password_auth_and_whitelist_bypass():
     assert login_ok(204, "") is True             # auth-bypass whitelist (qBittorrent 5.x)
     assert login_ok(200, "Fails.") is False      # wrong credentials
     assert login_ok(403, "banned") is False      # IP ban
+
+
+def test_add_ok_accepts_classic_and_json_responses():
+    from core.qbittorrent import add_ok
+
+    # Classic WebAPI
+    assert add_ok(200, "Ok.") is True
+    assert add_ok(200, "Fails.") is False
+    # qBittorrent 5.1+ JSON summary — a URL add is fetched async ("pending")
+    assert add_ok(200, '{"added_torrent_ids":[],"failure_count":0,"pending_count":1,"success_count":0}') is True
+    assert add_ok(200, '{"added_torrent_ids":["abc"],"failure_count":0,"pending_count":0,"success_count":1}') is True
+    assert add_ok(200, '{"added_torrent_ids":[],"failure_count":1,"pending_count":0,"success_count":0}') is False
+    # Non-2xx and garbage
+    assert add_ok(403, "banned") is False
+    assert add_ok(200, "<html>error</html>") is False

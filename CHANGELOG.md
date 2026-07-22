@@ -1,5 +1,10 @@
 # BookScout Changelog
 
+## [0.70.2] - 2026-07-22
+
+### Fixed
+- **qBittorrent 5.1 `torrents/add` JSON response** — newer WebAPI versions answer with a JSON summary (`{"pending_count": 1, "failure_count": 0, ...}`) instead of `Ok.`; URL adds are fetched asynchronously and count as *pending*. The strict `Ok.` check misclassified every successful send as a failure (502 on approve, `autodownload.failed` events) even though the torrent was accepted. New `add_ok()` parser handles both response formats.
+
 ## [0.70.1] - 2026-07-22
 
 ### Changed

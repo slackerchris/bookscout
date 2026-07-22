@@ -5,7 +5,7 @@ import io
 import logging
 from typing import Any
 
-from core.qbittorrent import login_ok
+from core.qbittorrent import add_ok, login_ok
 
 import httpx
 
@@ -255,9 +255,9 @@ async def _send_qbittorrent(
             cookies=dict(lr.cookies),
             timeout=10,
         )
-        if r.status_code == 200 and r.text.strip() == "Ok.":
+        if add_ok(r.status_code, r.text):
             return {"success": True}
-        return {"success": False, "detail": r.text.strip()}
+        return {"success": False, "detail": r.text.strip() or f"HTTP {r.status_code}"}
     except Exception as exc:
         logger.error("qBittorrent send failed", extra={"error": str(exc)})
         return {"success": False, "detail": str(exc)}
