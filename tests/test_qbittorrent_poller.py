@@ -56,3 +56,12 @@ def test_skips_when_no_path_derivable():
 
 def test_tolerates_junk_entries():
     assert select_import_candidates([None, "x", {}, _torrent()]) != []  # type: ignore[list-item]
+
+
+def test_login_ok_accepts_password_auth_and_whitelist_bypass():
+    from core.qbittorrent import login_ok
+
+    assert login_ok(200, "Ok.") is True          # normal password auth
+    assert login_ok(204, "") is True             # auth-bypass whitelist (qBittorrent 5.x)
+    assert login_ok(200, "Fails.") is False      # wrong credentials
+    assert login_ok(403, "banned") is False      # IP ban

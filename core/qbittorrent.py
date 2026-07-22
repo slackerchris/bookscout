@@ -31,6 +31,17 @@ TAG_IMPORTED = "bs-imported"
 TAG_FAILED = "bs-failed"
 
 
+def login_ok(status_code: int, text: str) -> bool:
+    """True when a qBittorrent ``auth/login`` response indicates success.
+
+    Password auth answers ``200 Ok.`` (or ``200 Fails.`` on bad credentials).
+    When the client IP is on the WebUI's auth-bypass whitelist, qBittorrent
+    instead replies ``204`` with an empty body — no SID cookie is issued or
+    needed for subsequent calls.
+    """
+    return 200 <= status_code < 300 and text.strip() != "Fails."
+
+
 async def login(client: httpx.AsyncClient, url: str, username: str, password: str) -> dict | None:
     """Return session cookies on success, None on auth failure."""
     try:
@@ -39,8 +50,8 @@ async def login(client: httpx.AsyncClient, url: str, username: str, password: st
             data={"username": username, "password": password},
             timeout=10,
         )
-        if r.status_code == 200 and r.text.strip() == "Ok.":
-            return dict(r.cookies)
+        if login_ok(r.status_code, r.text):
+            return dict(r.cookies)  # empty when auth was bypassed — that's fine
     except Exception as exc:
         logger.error("qBittorrent login failed", extra={"error": str(exc)})
     return None

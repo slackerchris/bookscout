@@ -5,6 +5,8 @@ import io
 import logging
 from typing import Any
 
+from core.qbittorrent import login_ok
+
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -237,7 +239,7 @@ async def _send_qbittorrent(
             data={"username": username, "password": password},
             timeout=10,
         )
-        if lr.status_code != 200 or lr.text.strip() != "Ok.":
+        if not login_ok(lr.status_code, lr.text):
             return {"success": False, "detail": "Authentication failed"}
         payload: dict[str, str] = {"urls": download_url}
         if save_path:
@@ -384,7 +386,7 @@ async def _queue_qbittorrent(
             data={"username": username, "password": password},
             timeout=10,
         )
-        if lr.status_code != 200 or lr.text.strip() != "Ok.":
+        if not login_ok(lr.status_code, lr.text):
             return []
         r = await client.get(
             f"{url}/api/v2/torrents/info",
@@ -544,7 +546,7 @@ async def check_qbittorrent_status(
             data={"username": username, "password": password},
             timeout=10,
         )
-        if lr.status_code == 200 and lr.text.strip() == "Ok.":
+        if login_ok(lr.status_code, lr.text):
             vr = await client.get(
                 f"{qbt_url}/api/v2/app/version",
                 cookies=dict(lr.cookies),
