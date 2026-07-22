@@ -1,5 +1,10 @@
 # BookScout Changelog
 
+## [0.70.1] - 2026-07-22
+
+### Changed
+- **CI: immutable version tags** — the image build now fails if the current `VERSION` already exists on GHCR, forcing a bump (and changelog entry) for every published code change. Docs-only commits no longer trigger image builds.
+
 ## [0.70.0] - 2026-07-22
 
 ### Added
