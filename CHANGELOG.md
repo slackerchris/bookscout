@@ -1,5 +1,10 @@
 # BookScout Changelog
 
+## [0.75.0] - 2026-07-22
+
+### Added
+- **Indexer trust preferences** — `preferred_indexers` and `fallback_indexers` (comma-separated, on `/settings/download-preferences`) weight automatic release selection: preferred indexers (private trackers) score +15, fallback indexers (public-tracker Jackett instances) −10, so a public grab only wins when nothing better exists.
+
 ## [0.74.0] - 2026-07-22
 
 ### Added

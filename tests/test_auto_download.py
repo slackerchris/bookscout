@@ -150,3 +150,16 @@ def test_multi_narrator_field_matches_any():
         [other, r], {}, book_title="Titan War", narrator="Ray Porter, Julia Whelan"
     )
     assert best == r
+
+
+def test_preferred_indexer_outranks_equal_release():
+    prefs = {"preferred_indexers": "ABtorrents", "fallback_indexers": "jackett"}
+    private = _result(title="Titan War [M4B]", seeders=1, indexer="ABtorrents", source="Prowlarr")
+    public = _result(title="Titan War [M4B]", seeders=10, indexer="Jackett", source="Prowlarr")
+    assert select_best_result([public, private], prefs) == private
+
+
+def test_fallback_indexer_still_wins_when_alone():
+    prefs = {"fallback_indexers": "jackett"}
+    only = _result(title="Titan War [MP3]", seeders=1, indexer="Jackett")
+    assert select_best_result([only], prefs) == only

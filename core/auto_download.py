@@ -70,6 +70,10 @@ def _title_words(text: str) -> set[str]:
     return {w for w in _WORD_RE.findall(text.lower()) if w not in _STOPWORDS}
 
 
+def _csv_names(value: Any) -> list[str]:
+    return [part.strip().lower() for part in str(value or "").split(",") if part.strip()]
+
+
 def score_result(
     r: dict[str, Any],
     prefs: dict[str, Any],
@@ -132,6 +136,14 @@ def score_result(
         surname = author_name.split()[-1].lower() if author_name.split() else ""
         if surname and surname in title:
             score += 8
+
+    # Indexer trust: private trackers (curated, well-seeded, ratio economy)
+    # outrank public-tracker fallbacks of otherwise equal quality.
+    indexer_blob = f"{r.get('indexer', '')} {r.get('source', '')}".lower()
+    if any(name in indexer_blob for name in _csv_names(prefs.get("preferred_indexers"))):
+        score += 15
+    if any(name in indexer_blob for name in _csv_names(prefs.get("fallback_indexers"))):
+        score -= 10
 
     # Edition match: for audiobooks the narrator identifies the recording —
     # a release naming the catalog's known narrator is the *right edition*,

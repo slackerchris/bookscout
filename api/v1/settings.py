@@ -29,6 +29,12 @@ class DownloadPreferences(BaseModel):
     # "approval" — record best match as a pending attempt for one-click approval
     # "auto"     — send the best match straight to the download client
     auto_download_mode: str = "approval"
+    # Comma-separated indexer/tracker names. Results from preferred indexers
+    # (e.g. private trackers) get a scoring bonus; fallback indexers (e.g. a
+    # Jackett instance full of public trackers) get a penalty so they only
+    # win when nothing better exists.
+    preferred_indexers: str = ""
+    fallback_indexers: str = ""
 
 
 class DownloadPreferencesUpdate(BaseModel):
@@ -38,6 +44,8 @@ class DownloadPreferencesUpdate(BaseModel):
     require_unabridged: bool | None = None
     max_size_gb: float | None = None
     auto_download_mode: str | None = None
+    preferred_indexers: str | None = None
+    fallback_indexers: str | None = None
 
 
 # ---------------------------------------------------------------------------
