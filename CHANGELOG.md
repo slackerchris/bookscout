@@ -1,5 +1,14 @@
 # BookScout Changelog
 
+## [0.70.0] - 2026-07-22
+
+### Added
+- **Batch download requests** — `POST /download-history/request` (`{book_ids: [...]}`) enqueues a worker job that searches the indexers for each book and records the best match (ranked by download preferences) as a *pending* attempt for one-click approval. Powers the Series page "Search all missing" button. Skips unreleased books and books with existing queued/pending attempts; shares the search/select/record logic with the post-scan auto-download pass.
+
+### Fixed
+- **qBittorrent auth-bypass whitelist support** — with "Bypass authentication for whitelisted IP subnets" enabled, qBittorrent answers `auth/login` with `204` and an empty body instead of `200 Ok.` for every whitelisted client. All four login checks (send, queue, status, import poller) treated that as "Authentication failed"; a shared `login_ok()` helper now accepts both handshakes.
+- **Migration 0013 on databases without the named constraint** — `ON CONFLICT ON CONSTRAINT uq_book_author_role` failed where `book_authors` uniqueness comes only from the composite primary key; now targets the column list.
+
 ## [0.69.0] - 2026-07-21
 
 ### Added
