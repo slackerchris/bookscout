@@ -65,7 +65,7 @@ def upgrade() -> None:
                         SELECT :canonical, author_id, role, author_order
                         FROM book_authors
                         WHERE book_id = :dup
-                        ON CONFLICT ON CONSTRAINT uq_book_author_role DO NOTHING
+                        ON CONFLICT (book_id, author_id, role) DO NOTHING
                         """
                     ),
                     {"canonical": canonical_id, "dup": dup_id},
