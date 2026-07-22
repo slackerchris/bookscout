@@ -221,3 +221,26 @@ class TestImportDownload:
         # Series segment must be absent
         assert "Frank Herbert" in str(dest)
         assert dest.parent.name == "Frank Herbert"
+
+
+class TestCompactInitials:
+    def test_spaced_initials_collapse_in_author_folder(self, tmp_path):
+        dest = _build_dest(tmp_path, "B. V. Larson", "Pax Solis", "Titan War")
+        assert dest == tmp_path / "B.V. Larson" / "Pax Solis" / "Titan War"
+
+    def test_initial_chains_collapse(self, tmp_path):
+        dest = _build_dest(tmp_path, "J. N. Chaney", None, "Backyard Starship")
+        assert dest.parent.name == "J.N. Chaney"
+
+    def test_plain_names_untouched(self, tmp_path):
+        dest = _build_dest(tmp_path, "Brandon Sanderson", None, "Dune")
+        assert dest.parent.name == "Brandon Sanderson"
+
+    def test_opt_out_keeps_spacing(self, tmp_path):
+        dest = _build_dest(tmp_path, "B. V. Larson", None, "Titan War", compact_initials=False)
+        assert dest.parent.name == "B. V. Larson"
+
+    def test_title_and_series_never_compacted(self, tmp_path):
+        # Only the author segment is normalized — a title with initials keeps them.
+        dest = _build_dest(tmp_path, "Author", "U. S. History", "E. T. Goes Home")
+        assert dest == tmp_path / "Author" / "U. S. History" / "E. T. Goes Home"

@@ -1,5 +1,10 @@
 # BookScout Changelog
 
+## [0.77.0] - 2026-07-22
+
+### Added
+- **Compact initials in author folders** — imports collapse spaced initials in the author *folder* segment ("B. V. Larson" → `B.V. Larson/`, "J. N. Chaney" → `J.N. Chaney/`) while display names in the catalog keep their spacing. Title and series segments are never touched. Opt out with `postprocess.compact_initials: false` / `POSTPROCESS_COMPACT_INITIALS=false`.
+
 ## [0.76.0] - 2026-07-22
 
 ### Added

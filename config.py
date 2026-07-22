@@ -74,6 +74,9 @@ _DEFAULT: dict = {
         # Rename imported audio files to "<Title> - Part NN.ext" instead of
         # keeping the release's original filenames.
         "rename_files": True,
+        # Collapse spaced initials in the author folder: "B. V. Larson" ->
+        # "B.V. Larson".  Display names are unaffected.
+        "compact_initials": True,
     },
 }
 
@@ -146,6 +149,8 @@ def _apply_env_overrides(data: dict) -> dict:
         data["postprocess"]["library_root"] = v
     if v := env.get("POSTPROCESS_RENAME_FILES"):
         data["postprocess"]["rename_files"] = v.strip().lower() in ("1", "true", "yes", "on")
+    if v := env.get("POSTPROCESS_COMPACT_INITIALS"):
+        data["postprocess"]["compact_initials"] = v.strip().lower() in ("1", "true", "yes", "on")
     if v := env.get("SCAN_CACHE_TTL_HOURS"):
         data["scan"]["cache_ttl_hours"] = int(v)
     if v := env.get("SCAN_LANGUAGE_FILTER"):

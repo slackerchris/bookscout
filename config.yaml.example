@@ -66,3 +66,6 @@ postprocess:
   # Rename imported audio files to "<Title> - Part NN.ext" (single files
   # become "<Title>.ext") instead of keeping release filenames.
   rename_files: true
+  # Collapse spaced initials in author folders: "B. V. Larson" -> "B.V. Larson"
+  # (display names in the UI keep their spacing).
+  compact_initials: true

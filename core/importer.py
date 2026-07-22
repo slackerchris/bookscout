@@ -48,13 +48,32 @@ def _sanitise(name: str, max_len: int = 120) -> str:
     return name[:max_len] or "_"
 
 
-def _build_dest(library_root: Path, author: str, series: str | None, title: str) -> Path:
+# "B. V. Larson" -> "B.V. Larson": collapse the space after an initial when
+# another initial follows.  Applied to the author FOLDER only — display names
+# keep their spacing.
+_INITIALS_RE = re.compile(r"\b([A-Z])\.\s+(?=[A-Z]\.)")
+
+
+def _compact_initials(name: str) -> str:
+    return _INITIALS_RE.sub(r"\1.", name)
+
+
+def _build_dest(
+    library_root: Path,
+    author: str,
+    series: str | None,
+    title: str,
+    compact_initials: bool = True,
+) -> Path:
     """Return the target directory for this book.
 
     Structure: <library_root>/<Author>/<Series>/<Title>/
-    The series segment is omitted when *series* is empty/None.
+    The series segment is omitted when *series* is empty/None.  With
+    *compact_initials* (default), spaced initials in the author segment are
+    collapsed ("B. V. Larson" -> "B.V. Larson") for tidier paths.
     """
-    parts = [library_root, Path(_sanitise(author))]
+    folder_author = _compact_initials(author) if compact_initials else author
+    parts = [library_root, Path(_sanitise(folder_author))]
     if series:
         parts.append(Path(_sanitise(series)))
     parts.append(Path(_sanitise(title)))
@@ -158,6 +177,7 @@ def import_download(
     title: str,
     series: str | None = None,
     rename_files: bool = True,
+    compact_initials: bool = True,
 ) -> dict[str, Any]:
     """Extract (if needed) and organise an audiobook download.
 
@@ -260,7 +280,7 @@ def import_download(
         }
 
     # ── Step 4: build destination path ──────────────────────────────────────
-    dest = _build_dest(library_root, author, series, title)
+    dest = _build_dest(library_root, author, series, title, compact_initials=compact_initials)
     dest.mkdir(parents=True, exist_ok=True)
 
     # ── Step 5: copy files ──────────────────────────────────────────────────
