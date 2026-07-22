@@ -75,6 +75,7 @@ def score_result(
     prefs: dict[str, Any],
     book_title: str = "",
     author_name: str = "",
+    narrator: str = "",
 ) -> float:
     """Quality score for one indexer result — higher is better.
 
@@ -132,6 +133,22 @@ def score_result(
         if surname and surname in title:
             score += 8
 
+    # Edition match: for audiobooks the narrator identifies the recording —
+    # a release naming the catalog's known narrator is the *right edition*,
+    # not merely a nicer file (Audible re-records swap narrators).
+    if narrator:
+        for person in narrator.split(","):
+            person = person.strip().lower()
+            if not person:
+                continue
+            if person in title:
+                score += 20
+                break
+            surname = person.split()[-1]
+            if len(surname) > 3 and surname in title:
+                score += 10
+                break
+
     return score
 
 
@@ -140,6 +157,7 @@ def select_best_result(
     prefs: dict[str, Any],
     book_title: str = "",
     author_name: str = "",
+    narrator: str = "",
 ) -> dict[str, Any] | None:
     """Pick the best indexer result under the user's download preferences.
 
@@ -179,7 +197,7 @@ def select_best_result(
     return max(
         viable,
         key=lambda r: (
-            score_result(r, prefs, book_title, author_name),
+            score_result(r, prefs, book_title, author_name, narrator),
             int(r.get("seeders") or 0),
         ),
     )
@@ -310,7 +328,12 @@ async def _search_and_record(
         )
         return "none"
 
-    best = select_best_result(results, prefs, book_title=book.title, author_name=author_name)
+    best = select_best_result(
+        results, prefs,
+        book_title=book.title,
+        author_name=author_name,
+        narrator=book.narrator or "",
+    )
     if best is None:
         return "none"
 

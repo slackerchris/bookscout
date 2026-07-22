@@ -129,3 +129,24 @@ def test_nzb_gets_availability_credit():
     torrent = _result(title="Titan War [M4B]", seeders=1)
     # NZB flat credit (+10) beats a 1-seeder torrent of equal quality
     assert select_best_result([torrent, nzb], {}) == nzb
+
+
+def test_known_narrator_edition_wins():
+    # Catalog knows the book's narrator (e.g. from the archived Audible
+    # edition) — the release naming that narrator is the right EDITION,
+    # even against a better-seeded re-record.
+    original = _result(title="Titan War [M4B] read by Ray Porter", seeders=2)
+    rerecord = _result(title="Titan War [M4B] narrated by Someone Else", seeders=20)
+    best = select_best_result(
+        [rerecord, original], {}, book_title="Titan War", narrator="Ray Porter"
+    )
+    assert best == original
+
+
+def test_multi_narrator_field_matches_any():
+    r = _result(title="Titan War [M4B] - Julia Whelan", seeders=1)
+    other = _result(title="Titan War [M4B]", seeders=1)
+    best = select_best_result(
+        [other, r], {}, book_title="Titan War", narrator="Ray Porter, Julia Whelan"
+    )
+    assert best == r

@@ -1,5 +1,10 @@
 # BookScout Changelog
 
+## [0.74.0] - 2026-07-22
+
+### Added
+- **Narrator-aware edition matching** — when the catalog knows a book's narrator (from Audnexus metadata, ABS, or a manual edit), releases naming that narrator score a strong bonus in automatic selection. For audiobooks the narrator identifies the *recording*: Audible re-records swap voice actors and delist the originals, so this steers auto-download toward the edition you actually want rather than whichever re-record currently seeds best. Multi-narrator credits match on any listed narrator.
+
 ## [0.73.0] - 2026-07-22
 
 ### Added
