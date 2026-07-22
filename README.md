@@ -10,15 +10,19 @@ Headless audiobook-tracking service. Queries Open Library, Google Books, and the
 
 - **Multi-source discovery** — Open Library, Google Books, Audnexus, and ISBNdb queried in parallel
 - **Confidence scoring** — every book gets a `HIGH / MEDIUM / LOW` band with per-reason breakdown
-- **Smart deduplication** — fuzzy author matching handles initials, name variants, and inverted surnames
+- **Smart deduplication** — fuzzy author matching handles initials, name variants, and inverted surnames; DB-level uniqueness backstop prevents duplicate books even under concurrent scans
+- **Auto-download** (v0.69.0) — per-author opt-in: after each scan, the best indexer match for new HIGH-confidence released books is sent to your download client automatically, or queued for one-click approval
+- **Auto-import** (v0.69.0) — built-in qBittorrent poller detects completed BookScout downloads, extracts/organises them into your library, and marks them owned. No external automation needed
+- **Series view** (v0.69.0) — `GET /series` groups the catalog by series with per-position ownership and gap detection ("own 1, 2, 4 — position 3 missing from catalog")
+- **Primary-author intelligence** (v0.69.0) — co-authored books file under their top-billed author (billing order from the source metadata); manual picks are pinned and never overridden by scans
 - **Filesystem scanner** — watches local library paths and cross-references files against catalog results
 - **Audiobookshelf integration** — marks books owned vs. missing against your ABS library; one-click bulk sync
 - **Prowlarr / Jackett search** — unified indexer search with download routing to qBittorrent, Transmission, or SABnzbd
-- **Download history** — every send-to-client action is recorded with release title, type, size, and outcome
-- **Metadata editing** — `PATCH /books/{id}` accepts full manual overrides (title, series, narrator, release date, language, identifiers)
+- **Download history** — every send-to-client action is recorded with release title, type, size, and outcome; pending auto-downloads can be approved or dismissed
+- **Metadata editing** — `PATCH /books/{id}` accepts full manual overrides (title, series, narrator, release date, language, identifiers); explicit `null` clears a field
 - **Duplicate detection** — `GET /books/duplicates` surfaces books that share a normalised title so cleanup is a one-step operation
 - **Export** — `GET /books/export` downloads the full catalog as a JSON file
-- **Webhooks + SSE** — push `scan.complete`, `coauthor.discovered`, and `import.complete` events to n8n, Discord, Mafl, etc.
+- **Webhooks + SSE** — push `scan.complete`, `coauthor.discovered`, `import.complete`, and `autodownload.*` events to Discord, n8n, Mafl, etc.
 - **Scheduled scans** — cron-driven background worker (arq + Redis) rescans watchlist authors automatically
 
 ## Why BookScout?
@@ -132,6 +136,12 @@ postprocess:
   mode: client            # "client" = download client handles it
                           # "bookscout" = BookScout extracts and organises files
   library_root: ""        # required when mode = "bookscout"
+  # Poll qBittorrent for completed BookScout downloads (tagged bookscout-<id>)
+  # and import them automatically. Active when mode = "bookscout" and a
+  # qBittorrent client is configured. Successful imports are tagged
+  # "bs-imported"; failures "bs-failed" (remove that tag to retry).
+  auto_import: true
+  auto_import_interval_minutes: 2
 
 scan:
   schedule_cron: "0 * * * *"
@@ -196,7 +206,9 @@ When `server.secret_key` is set to anything other than the default placeholder, 
 Authorization: Bearer <your-secret-key>
 ```
 
-If the key is left at the default, a warning is printed at startup and all endpoints are accessible without credentials. **Always set a non-default key in production.**
+If the key is left at the default, a warning is printed at startup and all endpoints are accessible without credentials.
+
+> **Note:** [bookscout-ui](https://github.com/slackerchris/bookscout-ui) does not send bearer tokens yet. If you use the web UI, leave `secret_key` unset and restrict access at the network layer instead (LAN-only reverse proxy with an access list, VPN, etc.).
 
 ---
 
@@ -214,8 +226,9 @@ If the key is left at the default, a warning is printed at startup and all endpo
 | `GET` | `/api/v1/books/upcoming` | Books with a future release date |
 | `GET` | `/api/v1/books/export` | Download full catalog as `bookscout-export.json` |
 | `GET` | `/api/v1/books/duplicates` | Find books sharing a normalised title + author |
+| `GET` | `/api/v1/books/co-author-conflicts` | Books where 2+ watched authors are credited — pick the true primary |
 | `GET` | `/api/v1/books/{id}` | Get single book |
-| `PATCH` | `/api/v1/books/{id}` | Update book metadata (title, series, narrator, release date, language, ASIN/ISBN, etc.) |
+| `PATCH` | `/api/v1/books/{id}` | Update book metadata; setting `primary_author_id` pins it against scan reassignment (`primary_author_manual: false` unpins) |
 | `DELETE` | `/api/v1/books/{id}` | Soft-delete (dismiss) a book |
 | `POST` | `/api/v1/books/{id}/search` | Search indexers for this book |
 | `POST` | `/api/v1/books/{id}/rescan` | Re-queue a metadata scan for the book's author |
@@ -231,7 +244,7 @@ If the key is left at the default, a warning is printed at startup and all endpo
 | `GET` | `/api/v1/authors/favorites` | List favourite author IDs |
 | `GET` | `/api/v1/authors/unwatched` | Authors imported from ABS but not on the watchlist |
 | `GET` | `/api/v1/authors/{id}` | Get author + stats |
-| `PATCH` | `/api/v1/authors/{id}` | Update author name / active status |
+| `PATCH` | `/api/v1/authors/{id}` | Update author name / active status / `auto_download` opt-in |
 | `DELETE` | `/api/v1/authors/{id}` | Remove from watchlist |
 | `POST` | `/api/v1/authors/{id}/watch` | Add existing author to watchlist |
 | `POST` | `/api/v1/authors/{id}/favorite` | Mark author as favourite |
@@ -260,17 +273,25 @@ If the key is left at the default, a warning is printed at startup and all endpo
 |---|---|---|
 | `POST` | `/api/v1/search` | Search Prowlarr + Jackett indexers |
 | `POST` | `/api/v1/search/download` | Send a result to the configured download client; records a `download_attempt` row |
-| `GET` | `/api/v1/search/status` | Check indexer, download client, and n8n connectivity |
+| `GET` | `/api/v1/search/status` | Check indexer and download client connectivity |
 | `GET` | `/api/v1/search/download/queue` | Fetch the active download client queue |
-| `GET` | `/api/v1/download-history` | List recent download attempts |
+| `GET` | `/api/v1/download-history` | List recent download attempts (`?status=pending` for auto-download approvals) |
+| `POST` | `/api/v1/download-history/{id}/approve` | Approve a pending auto-download — sends it to the client |
+| `POST` | `/api/v1/download-history/{id}/dismiss` | Dismiss a pending auto-download |
 | `DELETE` | `/api/v1/download-history` | Clear all download history |
+
+### Series
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/series` | Series with per-position ownership + gap detection (`?missing_only=true`, `?author_id=`) |
 
 ### Settings
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/v1/settings/download-preferences` | Get quality/format preferences used by the UI for search scoring |
-| `PATCH` | `/api/v1/settings/download-preferences` | Update download preferences |
+| `GET` | `/api/v1/settings/download-preferences` | Get quality/format preferences (also drive auto-download match selection) |
+| `PATCH` | `/api/v1/settings/download-preferences` | Update preferences, incl. `auto_download_mode`: `"approval"` (default) or `"auto"` |
 
 ### Webhooks & Events
 
@@ -314,14 +335,18 @@ Audiobookshelf ──────► BookScout API ◄──── BookScout UI 
                ┌──────────────┼──────────────┐
                ▼              ▼              ▼
           Prowlarr        Webhooks         SSE
-        (search missing)  (n8n / Discord)  (Mafl / dashboard)
+        (search missing)  (Discord / n8n)  (Mafl / dashboard)
                │
           qBittorrent / Transmission / SABnzbd
         (send downloads)
+               │
+        auto-import poller (worker)
+        (completed torrent → extract → library → owned)
 ```
 
-- Webhooks fire on `scan.complete`, `coauthor.discovered`, `import.complete`
+- Webhooks fire on `scan.complete`, `coauthor.discovered`, `import.complete`, and `autodownload.pending|sent|failed`
 - SSE feed (`/api/v1/events`) streams real-time scan and import progress to any connected client
+- The full hands-free loop: scan discovers a new HIGH-confidence book → auto-download grabs the best match → qBittorrent finishes → the poller imports it into your library and marks it owned. No external automation (n8n, scripts) required.
 
 ---
 

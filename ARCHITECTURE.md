@@ -2,8 +2,10 @@
 
 ## System Overview
 
-BookScout is an **async headless REST API service** built on FastAPI.  There
-is no web UI — all interaction is via HTTP endpoints documented at `/docs`.
+BookScout is an **async headless REST API service** built on FastAPI.
+All interaction is via HTTP endpoints documented at `/docs`; the optional
+[bookscout-ui](https://github.com/slackerchris/bookscout-ui) web panel is a
+separate SPA that consumes this API.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -171,11 +173,46 @@ download_attempts (
 - **Required**: `audiobookshelf.url` + `audiobookshelf.token` in config.yaml
 - **Called**: Once per book, per scan — serialised to avoid ABS rate limits
 
-### Prowlarr
+### Prowlarr / Jackett
 - **Purpose**: Search download indexers for a missing book
-- **Method**: REST API redirect (client-side trigger)
 - **Required**: `prowlarr.url` + `prowlarr.api_key` in config.yaml
-- **Called**: On demand — BookScout never auto-downloads
+- **Called**: On demand from the UI/API, and by **auto-download** (v0.69.0)
+  after each scan for authors with `watchlist.auto_download` enabled
+
+### Auto-download (v0.69.0)
+- After a scan, `core/auto_download.py` finds the author's HIGH-confidence,
+  released, missing books, searches the indexers, and picks the best result
+  under the download preferences (min seeders / max size hard filters,
+  preferred format soft filter)
+- `auto_download_mode` (download preferences): `"approval"` records the
+  match as a *pending* `download_attempt` for one-click approval;
+  `"auto"` sends it straight to the download client
+- Guardrails: unreleased/undated books never grabbed; queued/pending
+  attempts never repeated; 24 h cooldown after failures; co-authored books
+  grab under their primary author only
+
+### qBittorrent auto-import poller (v0.69.0)
+- `poll_completed_downloads_task` runs on a cron
+  (`postprocess.auto_import_interval_minutes`, default 2 min) when
+  `postprocess.mode: bookscout` and a qBittorrent client are configured
+- Every torrent BookScout sends is tagged `bookscout-<book_id>`; the poller
+  lists completed torrents in the configured category, imports each tagged
+  one through the normal import pipeline, then tags it `bs-imported`
+  (or `bs-failed` — remove that tag in qBittorrent to retry)
+- Auth: username/password from config, **or** qBittorrent's
+  "bypass authentication for whitelisted IP subnets" (the 204 bypass
+  handshake is recognised)
+
+### Primary-author resolution (v0.69.0)
+- Co-authored books carry `author_order` (billing position from the source
+  metadata) on each `book_authors` row; after every insert/update the
+  lowest-order linked author becomes `primary_author_id`
+  ("billing order wins"), with deterministic tie-breaks
+- A manual choice via `PATCH /books/{id}` sets `primary_author_manual` and
+  is never overridden by scans
+- Duplicate prevention is backed by partial unique indexes on live rows
+  (`asin`, `isbn13`) — a concurrent-scan insert race is recovered by
+  re-finding the winner's row and linking to it
 
 ### Redis pub/sub events
 
@@ -184,6 +221,9 @@ download_attempts (
 | `scan.complete` | `author_id`, `author_name`, `new_books`, `updated_books`, `discovered[]` |
 | `coauthor.discovered` | `author_id`, `author_name`, `coauthors[]`, `auto_added` |
 | `import.complete` | `book_id`, `book_title`, `author_name`, `destination`, `files_copied[]` |
+| `autodownload.pending` | `book_id`, `book_title`, `author_id`, `author_name`, `release_title` |
+| `autodownload.sent` | same as above — best match sent to the download client |
+| `autodownload.failed` | same as above — send failed (see download history for detail) |
 
 Events are consumed by webhook subscribers
 (`POST /api/v1/webhooks/`) and the `/api/v1/events` SSE stream.
@@ -240,8 +280,14 @@ Deployment:
 
 ## Security Considerations
 
-- No web UI — attack surface limited to the REST API
-- API tokens stored in PostgreSQL (not config files)
+- Headless core — attack surface limited to the REST API (the UI is a
+  separate static SPA)
+- Optional bearer-token auth (`server.secret_key`); note bookscout-ui does
+  not send bearer tokens yet, so restrict access at the network/proxy layer
+  when using the UI
+- Download-client credentials live in config.yaml / env — never in
+  exported workflows; qBittorrent can run credential-free for BookScout via
+  its IP-whitelist auth bypass
 - No telemetry or phone-home
 - HTTPS strongly recommended via reverse proxy (Nginx Proxy Manager, Caddy)
 - Runs on local network — not intended to be internet-exposed

@@ -1,6 +1,6 @@
 # BookScout — Deployment Guide
 
-BookScout is a **headless FastAPI service** with no web UI. Interaction is via the REST API; interactive documentation is available at `/docs`.
+BookScout is a **headless FastAPI service**; interactive API documentation is available at `/docs`. The optional [bookscout-ui](https://github.com/slackerchris/bookscout-ui) web control panel ships as the `bookscout-ui` service in the compose file (port 8282).
 
 ---
 
@@ -45,9 +45,13 @@ server:
 Copy the `docker-compose.yml` from the repository and set one environment variable:
 
 ```bash
-# .env  (next to docker-compose.yml)
-POSTGRES_PASSWORD=a-strong-password
+# .env  (next to docker-compose.yml) — see .env.example for the full set
+POSTGRES_PASSWORD=a-strong-password   # letters+digits only: it is spliced into a URL
 ```
+
+> ⚠ `.env` gotchas: a `#` in an unquoted value silently truncates it; wrap
+> values containing `#`, spaces, or `$` in single quotes. Portainer stacks
+> do **not** read `.env` — use the stack's Environment variables section.
 
 Mount your `config.yaml` into the container:
 
@@ -80,7 +84,8 @@ bookscout  | [bookscout] started — API docs at /docs
 | `bookscout-redis` | `redis:7-alpine` | Job queue + event bus |
 | `bookscout-migrate` | `ghcr.io/slackerchris/bookscout` | One-shot Alembic migration |
 | `bookscout` | `ghcr.io/slackerchris/bookscout` | FastAPI on port 8765 |
-| `bookscout-worker` | `ghcr.io/slackerchris/bookscout` | arq background scanner |
+| `bookscout-worker` | `ghcr.io/slackerchris/bookscout` | arq worker — scans, auto-download, qBittorrent auto-import |
+| `bookscout-ui` | `ghcr.io/slackerchris/bookscout-ui` | Web control panel on port 8282 |
 
 ---
 
@@ -196,16 +201,12 @@ No additional configuration is required inside BookScout — it trusts the `X-Fo
 
 ## 9. systemd (bare-metal alternative)
 
-If you run BookScout outside Docker, use the included `bookscout.service` as a template. Update the `ExecStart` and `EnvironmentFile` lines:
+If you run BookScout outside Docker, **two units are required** — the API alone never executes scans or imports:
 
-```ini
-[Service]
-ExecStart=/usr/local/bin/uvicorn main:app --host 0.0.0.0 --port 8765
-WorkingDirectory=/opt/bookscout
-EnvironmentFile=/opt/bookscout/.env
-```
+- `bookscout.service` — the API (runs `alembic upgrade head` on start)
+- `bookscout-worker.service` — the arq worker (scans, auto-download, auto-import)
 
-Database and Redis must be provided externally; set `DATABASE_URL` and `REDIS_URL` in the environment file.
+Both templates are in the repository; update the paths/user in each. Database and Redis must be provided externally; set `DATABASE_URL` and `REDIS_URL` in the environment file.
 
 ---
 
@@ -221,11 +222,16 @@ docker compose logs postgres
 
 ### `bookscout-migrate` exits non-zero
 
-Usually a `DATABASE_URL` mismatch or the postgres service not healthy yet. Check:
+Check the actual traceback — the last lines name the failing statement:
 
 ```bash
 docker compose logs migrate | tail -20
 ```
+
+Common causes, by error message:
+- `Name or service not known` — the hostname in `DATABASE_URL` doesn't match the postgres **service key** in the compose file (the YAML key *is* the DNS name), or Docker's embedded DNS is broken on the host (common with snap-installed Docker or LXCs without `nesting=1`; static container IPs work around it)
+- `password authentication failed` — a restored `postgres-data` volume keeps its **original** password; the env var only applies on first initialisation. Fix with `ALTER USER bookscout WITH PASSWORD '...'` inside the postgres container
+- a migration traceback — file an issue with the log tail
 
 ### Books not matching Audiobookshelf
 
@@ -246,6 +252,12 @@ docker compose logs worker
 ```
 
 If Redis is unavailable the worker will exit — check `bookscout-redis` health.
+
+### qBittorrent shows "Authentication failed" / IP banned
+
+- Wrong password → qBittorrent bans the source IP after ~5 failed logins; restart qBittorrent to clear the ban **after** fixing the credential
+- Recommended for a dedicated BookScout host: qBittorrent → Options → Web UI → *Bypass authentication for clients in whitelisted IP subnets* → `your-bookscout-ip/32`. BookScout understands the bypass handshake (v0.69.0+) and the password becomes unnecessary on that path
+- The auto-import poller only processes completed torrents in `TORRENT_CATEGORY` that carry a `bookscout-<id>` tag (stamped automatically when BookScout sends the torrent)
 
 ---
 
@@ -280,7 +292,8 @@ bookscout/
 ├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
-├── bookscout.service           ← systemd template
+├── bookscout.service           ← systemd template (API)
+├── bookscout-worker.service    ← systemd template (worker — required)
 ├── api/v1/                     ← Route handlers
 │   ├── authors.py
 │   ├── books.py                ← includes /export, /duplicates, /{id}/rescan
@@ -292,6 +305,7 @@ bookscout/
 │   ├── settings.py             ← GET/PATCH /settings/download-preferences
 │   ├── abs.py
 │   ├── library_paths.py
+│   ├── series.py               ← GET /series — ownership + gap view
 │   ├── n8n.py
 │   └── health.py
 ├── core/
@@ -302,6 +316,8 @@ bookscout/
 │   ├── scanner.py              ← Filesystem scanner
 │   ├── audiobookshelf.py       ← ABS API client
 │   ├── importer.py             ← Post-download file organiser
+│   ├── qbittorrent.py          ← Completed-download poller (auto-import)
+│   ├── auto_download.py        ← Auto-download rules + best-match selection
 │   └── search.py               ← Prowlarr / Jackett / download client helpers
 ├── db/
 │   ├── models.py               ← SQLAlchemy async models
@@ -317,8 +333,9 @@ bookscout/
 │           ├── 0007_book_narrator.py
 │           ├── 0008_author_favorites.py
 │           ├── 0009_app_settings.py
-│           └── 0010_download_history.py
+│           ├── 0010_download_history.py
+│           └── ... (0011–0015: primary author, identifier uniqueness, auto-download)
 └── workers/
     ├── settings.py             ← arq WorkerSettings
-    └── tasks.py                ← scan_author_task, scan_all_authors_task, import_download_task
+    └── tasks.py                ← scan, import, and poll_completed_downloads tasks
 ```

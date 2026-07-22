@@ -1,8 +1,11 @@
 # BookScout — Quick Start
 
-BookScout is a **headless REST API service** — there is no web UI.  All
-interaction is through HTTP endpoints.  Browse every endpoint interactively
-at **http://localhost:8765/docs** once the service is running.
+BookScout is a **headless REST API service**.  Browse every endpoint
+interactively at **http://localhost:8765/docs** once the service is running.
+
+> Prefer a web UI?  [bookscout-ui](https://github.com/slackerchris/bookscout-ui)
+> is a React control panel for this API (included as the `bookscout-ui`
+> service in the compose file, port 8282).
 
 ---
 
@@ -16,19 +19,20 @@ at **http://localhost:8765/docs** once the service is running.
 ## Method 1: Docker Compose (Recommended)
 
 ```bash
-# 1. Create your config file
-cp config.yaml.example config.yaml   # edit as needed (see below)
+# 1. Create your env file (credentials, integration URLs)
+cp .env.example .env                 # read the formatting warnings at the top!
 
 # 2. Start everything
 docker compose up -d
 ```
 
-Five containers start:
+Containers started:
 - **bookscout** — FastAPI service on port **8765**
+- **bookscout-ui** — web control panel on port **8282**
 - **postgres** — PostgreSQL database
 - **redis** — Redis instance (job queue + event bus)
 - **bookscout-migrate** — runs `alembic upgrade head` once, then exits
-- **bookscout-worker** — arq background worker (scans, webhooks)
+- **bookscout-worker** — arq background worker (scans, auto-download, auto-import)
 
 API: **http://localhost:8765**  
 Interactive docs: **http://localhost:8765/docs**
@@ -105,6 +109,31 @@ Each book has:
 curl -X POST http://localhost:8765/api/v1/scans/all
 ```
 
+### 5. Optional: turn on the hands-free pipeline
+
+```bash
+# Auto-download: after each scan, grab the best indexer match for this
+# author's new HIGH-confidence released books (requires Prowlarr/Jackett
+# and a download client in your .env)
+curl -X PATCH http://localhost:8765/api/v1/authors/1 \
+     -H "Content-Type: application/json" \
+     -d '{"auto_download": true}'
+
+# Default mode queues finds for approval — list and approve them:
+curl "http://localhost:8765/api/v1/download-history/?status=pending"
+curl -X POST http://localhost:8765/api/v1/download-history/1/approve
+```
+
+With `POSTPROCESS_MODE=bookscout`, completed qBittorrent downloads are then
+imported into your library automatically — see the auto-import section in
+the [README](README.md).
+
+### 6. See your series gaps
+
+```bash
+curl "http://localhost:8765/api/v1/series/?missing_only=true"
+```
+
 ---
 
 ## Key API Endpoints
@@ -162,5 +191,5 @@ for better coverage.  Enable/disable individual sources under `scan.sources`.
 
 ---
 
-For full setup details, reverse-proxy configuration, webhooks, and n8n
-integration see [DEPLOYMENT.md](DEPLOYMENT.md).
+For full setup details, reverse-proxy configuration, and webhooks see
+[DEPLOYMENT.md](DEPLOYMENT.md).
